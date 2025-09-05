@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     rm -rf /var/lib/apt/lists/*
 
 COPY auto_vid /workspace/auto_vid
-COPY start.sh /workspace/start.sh
+COPY startup.sh /workspace/start.sh
 COPY requirements.txt /workspace/requirements.txt
 
 RUN chmod +x /workspace/start.sh
