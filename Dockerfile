@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git ffmpeg redis-server && \
     rm -rf /var/lib/apt/lists/*
 
-COPY auto_vid /workspace/auto_vid
+COPY autovid /workspace/auto_vid/
 COPY startup.sh /workspace/start.sh
 COPY requirements.txt /workspace/requirements.txt
 
