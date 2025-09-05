@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LTX-Video Generator - Простой</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin-top: 20px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        .loader {
+            text-align: center;
+            margin: 20px 0;
+            display: none;
+        }
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+        .status-pending {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .result {
+            margin-top: 30px;
+            text-align: center;
+        }
+        video {
+            max-width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 LTX-Video Generator</h1>
+        
+        <div class="preset-buttons" style="margin-bottom: 30px; display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
+            <button type="button" class="preset-btn" onclick="setPreset('shorts')" style="padding: 8px 12px; border: 2px solid #007bff; background: white; color: #007bff; border-radius: 6px; cursor: pointer; font-size: 12px;">📱 Shorts (9:16)</button>
+            <button type="button" class="preset-btn" onclick="setPreset('youtube')" style="padding: 8px 12px; border: 2px solid #007bff; background: white; color: #007bff; border-radius: 6px; cursor: pointer; font-size: 12px;">🖥️ YouTube (16:9)</button>
+            <button type="button" class="preset-btn" onclick="setPreset('instagram')" style="padding: 8px 12px; border: 2px solid #007bff; background: white; color: #007bff; border-radius: 6px; cursor: pointer; font-size: 12px;">📐 Instagram (1:1)</button>
+            <button type="button" class="preset-btn" onclick="setPreset('cinema')" style="padding: 8px 12px; border: 2px solid #007bff; background: white; color: #007bff; border-radius: 6px; cursor: pointer; font-size: 12px;">🎬 Кино (2:1)</button>
+        </div>
+
+        <form id="videoForm">
+            <div class="form-group">
+                <label for="prompt">📝 Описание видео *</label>
+                <textarea id="prompt" name="prompt" placeholder="Например: a cat walking in the garden" required></textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="negative_prompt">🚫 Негативный промпт</label>
+                <textarea id="negative_prompt" name="negative_prompt">worst quality, inconsistent motion, blurry, jittery, distorted</textarea>
+            </div>
+            
+            <div class="form-group">
+                <label for="image">🖼️ Начальное изображение (необязательно)</label>
+                <input type="file" id="image" name="image" accept="image/*">
+            </div>
+            
+            <div class="form-group">
+                <label for="resolution">📐 Разрешение</label>
+                <select id="resolution" name="resolution">
+                    <optgroup label="🏃 Быстрые (низкое качество)">
+                        <option value="512x512">512x512 (квадрат)</option>
+                        <option value="704x512">704x512 (стандарт)</option>
+                    </optgroup>
+                    <optgroup label="📱 Вертикальные (Shorts/TikTok)">
+                        <option value="720x1280">720x1280 (HD)</option>
+                        <option value="540x960">540x960 (qHD)</option>
+                        <option value="480x854">480x854 (SD)</option>
+                    </optgroup>
+                    <optgroup label="🖥️ Горизонтальные (YouTube/Web)">
+                        <option value="1280x720" selected>1280x720 (HD)</option>
+                        <option value="1920x1080">1920x1080 (Full HD)</option>
+                        <option value="960x540">960x540 (qHD)</option>
+                        <option value="854x480">854x480 (SD)</option>
+                    </optgroup>
+                    <optgroup label="📐 Квадратные (Instagram)">
+                        <option value="1024x1024">1024x1024 (квадрат HD)</option>
+                        <option value="1280x1280">1280x1280 (квадрат высокое)</option>
+                    </optgroup>
+                    <optgroup label="🎬 Кинематографические">
+                        <option value="2048x1152">2048x1152 (16:9 2K)</option>
+                        <option value="1728x1152">1728x1152 (3:2)</option>
+                        <option value="1152x768">1152x768 (3:2 стандарт)</option>
+                    </optgroup>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="duration">⏱️ Длительность</label>
+                <select id="duration" name="duration">
+                    <optgroup label="⚡ Короткие">
+                        <option value="48">2 секунды (48 кадров)</option>
+                        <option value="72">3 секунды (72 кадра)</option>
+                        <option value="96" selected>4 секунды (96 кадров)</option>
+                        <option value="120">5 секунд (120 кадров)</option>
+                        <option value="144">6 секунд (144 кадра)</option>
+                        <option value="192">8 секунд (192 кадра)</option>
+                        <option value="240">10 секунд (240 кадров)</option>
+                    </optgroup>
+                    <optgroup label="📹 Средние">
+                        <option value="360">15 секунд (360 кадров)</option>
+                        <option value="480">20 секунд (480 кадров)</option>
+                        <option value="600">25 секунд (600 кадров)</option>
+                        <option value="720">30 секунд (720 кадров)</option>
+                    </optgroup>
+                    <optgroup label="🎬 Длинные (медленно)">
+                        <option value="900">37.5 секунд (900 кадров)</option>
+                        <option value="1080">45 секунд (1080 кадров)</option>
+                        <option value="1200">50 секунд (1200 кадров)</option>
+                        <option value="1440">60 секунд (1440 кадров)</option>
+                    </optgroup>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label for="seed">🎲 Seed (для воспроизводимости)</label>
+                <input type="number" id="seed" name="seed" value="42">
+            </div>
+            
+            <button type="submit" id="generateBtn">🚀 Сгенерировать видео</button>
+        </form>
+        
+        <div class="loader" id="loader">
+            <p>⏳ Генерируется видео, пожалуйста подождите...</p>
+            <p><small>Это может занять несколько минут</small></p>
+        </div>
+        
+        <div class="status" id="status"></div>
+        
+        <div class="result" id="result">
+            <video id="videoPlayer" controls style="display: none;"></video>
+        </div>
+    </div>
+
+    <script>
+        // Обработка глобальных ошибок
+        window.addEventListener('error', function(e) {
+            console.error('🚨 Глобальная ошибка:', e.error);
+        });
+        
+        function getApiBaseUrl() {
+  const { protocol, hostname } = location;
+
+  // RunPod: подменяем порт в имени хоста
+  const match = hostname.match(/^(.*)-\d+\.proxy\.runpod\.net$/);
+  if (match) {
+    return `${protocol}//${match[1]}-8000.proxy.runpod.net`;
+  }
+
+  // Локалка
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return `${protocol}//${hostname}:8000`;
+  }
+
+  // fallback — просто добавим порт
+  return `${protocol}//${hostname}:8000`;
+}
+
+const API_BASE_URL = getApiBaseUrl();
+        
+        const form = document.getElementById('videoForm');
+        const loader = document.getElementById('loader');
+        const status = document.getElementById('status');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const generateBtn = document.getElementById('generateBtn');
+        
+        let pollingInterval;
+        
+        function showStatus(message, type = 'pending') {
+            status.textContent = message;
+            status.className = `status status-${type}`;
+            status.style.display = 'block';
+        }
+        
+        function hideStatus() {
+            status.style.display = 'none';
+        }
+        
+        async function pollTaskStatus(taskId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/status/${taskId}`);
+                const data = await response.json();
+                
+                console.log('Task status:', data);
+                
+                switch(data.status) {
+                    case 'PENDING':
+                        showStatus('🔄 Задача в очереди...', 'pending');
+                        break;
+                    case 'STARTED':
+                        showStatus('⚙️ Генерация началась...', 'pending');
+                        break;
+                    case 'SUCCESS':
+                        showStatus('✅ Видео готово!', 'success');
+                        
+                        // Загружаем видео
+                        try {
+                            const videoUrl = `${API_BASE_URL}/video/${data.result}`;
+                            videoPlayer.src = videoUrl;
+                            videoPlayer.style.display = 'block';
+                        } catch (err) {
+                            console.error('Ошибка загрузки видео:', err);
+                            showStatus('❌ Ошибка загрузки видео', 'error');
+                        }
+                        
+                        clearInterval(pollingInterval);
+                        loader.style.display = 'none';
+                        generateBtn.disabled = false;
+                        break;
+                    case 'FAILURE':
+                        showStatus('❌ Ошибка: ' + (data.result || 'Неизвестная ошибка'), 'error');
+                        clearInterval(pollingInterval);
+                        loader.style.display = 'none';
+                        generateBtn.disabled = false;
+                        break;
+                }
+            } catch (error) {
+                console.error('Ошибка при проверке статуса:', error);
+                showStatus('❌ Ошибка связи с сервером', 'error');
+            }
+        }
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            console.log('🚀 Форма отправлена!');
+            console.log('🔗 API URL:', API_BASE_URL);
+            
+            // Подготовка UI
+            generateBtn.disabled = true;
+            loader.style.display = 'block';
+            videoPlayer.style.display = 'none';
+            hideStatus();
+            
+            // Парсим разрешение
+            const resolution = document.getElementById('resolution').value;
+            const [width, height] = resolution.split('x').map(Number);
+            console.log('📏 Разрешение:', width, 'x', height);
+            
+            // Создаем FormData
+            const formData = new FormData();
+            formData.append('prompt', document.getElementById('prompt').value);
+            formData.append('negative_prompt', document.getElementById('negative_prompt').value);
+            formData.append('expected_width', width);
+            formData.append('expected_height', height);
+            formData.append('num_frames', document.getElementById('duration').value);
+            formData.append('seed', document.getElementById('seed').value);
+            
+            // Добавляем файл если есть
+            const imageFile = document.getElementById('image').files[0];
+            if (imageFile) {
+                formData.append('image', imageFile);
+                console.log('📁 Файл добавлен:', imageFile.name);
+            }
+            
+            console.log('📤 Отправляем запрос на:', `${API_BASE_URL}/generate`);
+            
+            try {
+                showStatus('📤 Отправляем задачу...', 'pending');
+                
+                const response = await fetch(`${API_BASE_URL}/generate`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Task created:', data);
+                
+                showStatus('🔄 Задача создана, ожидаем обработки...', 'pending');
+                
+                // Начинаем polling
+                pollingInterval = setInterval(() => pollTaskStatus(data.task_id), 3000);
+                
+            } catch (error) {
+                console.error('Ошибка:', error);
+                showStatus('❌ Ошибка отправки: ' + error.message, 'error');
+                loader.style.display = 'none';
+                generateBtn.disabled = false;
+            }
+        });
+        
+        // Автоматическая проверка связи с API при загрузке
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/`);
+                if (response.ok) {
+                    console.log('✅ API доступен');
+                } else {
+                    console.warn('⚠️ API отвечает с ошибкой');
+                }
+            } catch (error) {
+                console.error('❌ API недоступен:', error);
+                showStatus('⚠️ Не удается подключиться к API серверу', 'error');
+            }
+        });
+
+        // Функции пресетов для быстрой настройки
+        function setPreset(type) {
+            const resolutionSelect = document.getElementById('resolution');
+            const durationSelect = document.getElementById('duration');
+            
+            // Убираем активный класс со всех кнопок
+            document.querySelectorAll('.preset-btn').forEach(btn => {
+                btn.style.background = 'white';
+                btn.style.color = '#007bff';
+            });
+            
+            // Активируем текущую кнопку
+            event.target.style.background = '#007bff';
+            event.target.style.color = 'white';
+            
+            switch(type) {
+                case 'shorts':
+                    resolutionSelect.value = '720x1280';
+                    durationSelect.value = '96'; // 4 секунды
+                    break;
+                case 'youtube':
+                    resolutionSelect.value = '1920x1080';
+                    durationSelect.value = '240'; // 10 секунд
+                    break;
+                case 'instagram':
+                    resolutionSelect.value = '1024x1024';
+                    durationSelect.value = '144'; // 6 секунд
+                    break;
+                case 'cinema':
+                    resolutionSelect.value = '2048x1152';
+                    durationSelect.value = '480'; // 20 секунд
+                    break;
+            }
+        }
+    </script>
+</body>
+</html> 
