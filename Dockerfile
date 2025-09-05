@@ -7,11 +7,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git ffmpeg redis-server && \
     rm -rf /var/lib/apt/lists/*
 
+# копируем код
 COPY autovid /workspace/auto_vid/
-COPY startup.sh /workspace/start.sh
+COPY flux_service /workspace/flux_service/
+COPY startup.sh /workspace/startup.sh
+COPY handler.py /workspace/handler.py
 COPY requirements.txt /workspace/requirements.txt
 
-RUN chmod +x /workspace/start.sh
-RUN pip install --no-cache-dir -r /workspace/requirements.txt
+# права на скрипт
+RUN chmod +x /workspace/startup.sh
 
-CMD ["bash", "/workspace/start.sh"]
+# python-зависимости
+RUN pip install --no-cache-dir -r /workspace/requirements.txt
+RUN pip install runpod requests
+
+# точка входа — handler для serverless
+CMD ["python3", "/workspace/handler.py"]

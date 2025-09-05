@@ -1,2 +1,12 @@
-runpod
-requests
+fastapi 
+uvicorn 
+sqlalchemy 
+celery 
+redis 
+openai 
+dotenv 
+pydub
+mutagen
+opencv-python-headless
+requests_toolbelt
+python-multipart
