@@ -113,3 +113,16 @@ def handler(job):
         return {"video_url": url, "width": w, "height": h, "frames": len(latents)}
 
 runpod.serverless.start({"handler": handler})
+
+if __name__ == "__main__":
+    test_job = {
+        "input": {
+            "prompt": "A cute robot dog running on the beach",
+            "num_frames": 17,
+            "width": 512,
+            "height": 384,
+            "steps": 10,
+            "seed": 42
+        }
+    }
+    print(handler(test_job))

@@ -10,17 +10,12 @@ RUN apt-get update && apt-get install -y \
 # Обновим pip
 RUN pip install --upgrade pip
 
-# Установим зависимости
-RUN pip install \
-    runpod \
-    torch==2.3.1+cu121 torchvision==0.18.1+cu121 --extra-index-url https://download.pytorch.org/whl/cu121 \
-    transformers accelerate \
-    diffusers[torch] \
-    imageio[ffmpeg] \
-    huggingface_hub hf-transfer
+# Скопируем зависимости
+COPY requirements.txt /src/requirements.txt
 
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Установим зависимости (torch и torchvision тянем из PyTorch index)
+RUN pip install --no-cache-dir -r /src/requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/cu121
 
 # Рабочая папка
 WORKDIR /src
@@ -28,5 +23,5 @@ WORKDIR /src
 # Скопируем handler
 COPY handler.py /src/handler.py
 
-# По умолчанию запускаем handler
-CMD ["python", "handler.py"]
+# Запуск serverless-воркера
+CMD ["python3", "handler.py"]
