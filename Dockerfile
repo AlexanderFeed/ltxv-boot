@@ -1,25 +1,28 @@
-FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+# База RunPod с CUDA 12.2 (совместимо с LTX docs)
+FROM runpod/base:0.6.2-cuda12.2.0
 
-WORKDIR /workspace
+# Системные пакеты
+RUN apt-get update && apt-get install -y git ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# системные зависимости
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git ffmpeg redis-server && \
-    rm -rf /var/lib/apt/lists/*
+# Ускоренная загрузка весов с HF
+ENV HF_HUB_ENABLE_HF_TRANSFER=1 \
+    PIP_NO_CACHE_DIR=1
 
-# копируем код
-COPY autovid /workspace/auto_vid/
-COPY flux_service /workspace/flux_service/
-COPY startup.sh /workspace/startup.sh
-COPY handler.py /workspace/handler.py
-COPY requirements.txt /workspace/requirements.txt
+# PyTorch с CUDA 12.1 (подходит для 12.x рантайма)
+RUN pip install --upgrade pip \
+ && pip install --index-url https://download.pytorch.org/whl/cu121 \
+      torch==2.3.1 torchvision==0.18.1
 
-# права на скрипт
-RUN chmod +x /workspace/startup.sh
+# Библиотеки для LTX Video через Diffusers
+RUN pip install \
+      runpod \
+      "imageio[ffmpeg]" pillow numpy requests \
+      accelerate transformers huggingface_hub hf-transfer \
+ && pip install -U git+https://github.com/huggingface/diffusers
 
-# python-зависимости
-RUN pip install --no-cache-dir -r /workspace/requirements.txt
-RUN pip install runpod requests
+# Код воркера
+WORKDIR /src
+COPY rp_handler.py /src/rp_handler.py
 
-# точка входа — handler для serverless
-CMD ["python3", "/workspace/handler.py"]
+# Запуск serverless-воркера
+CMD ["python", "rp_handler.py"]

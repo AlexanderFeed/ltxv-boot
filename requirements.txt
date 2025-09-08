@@ -1,12 +1,3 @@
-fastapi 
-uvicorn 
-sqlalchemy 
-celery 
-redis 
-openai 
-dotenv 
-pydub
-mutagen
-opencv-python-headless
-requests_toolbelt
-python-multipart
+# Required Python packages get listed here, one per line.
+
+runpod~=1.7.9
