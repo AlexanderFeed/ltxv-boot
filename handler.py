@@ -1,4 +1,6 @@
-import os, io, tempfile, requests, runpod
+import os, io, tempfile 
+import requests 
+import runpod
 from huggingface_hub import login
 import torch
 from PIL import Image
