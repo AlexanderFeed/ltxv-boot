@@ -22,7 +22,7 @@ RUN pip install \
 
 # Код воркера
 WORKDIR /src
-COPY rp_handler.py /src/rp_handler.py
+COPY handler.py /src/handler.py
 
 # Запуск serverless-воркера
 CMD ["python", "rp_handler.py"]
