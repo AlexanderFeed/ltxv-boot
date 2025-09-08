@@ -8,3 +8,4 @@ diffusers[torch]
 imageio[ffmpeg]
 huggingface_hub
 hf-transfer
+Pillow
