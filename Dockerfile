@@ -19,6 +19,9 @@ RUN pip install \
     imageio[ffmpeg] \
     huggingface_hub hf-transfer
 
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
 # Рабочая папка
 WORKDIR /src
 
