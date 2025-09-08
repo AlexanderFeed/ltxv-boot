@@ -25,4 +25,4 @@ WORKDIR /src
 COPY handler.py /src/handler.py
 
 # Запуск serverless-воркера
-CMD ["python", "rp_handler.py"]
+CMD ["python", "handler.py"]
