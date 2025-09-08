@@ -15,7 +15,8 @@ COPY requirements.txt /src/requirements.txt
 
 # Установим зависимости (torch и torchvision тянем из PyTorch index)
 RUN pip install --no-cache-dir -r /src/requirements.txt \
-    --extra-index-url https://download.pytorch.org/whl/cu121
+    --extra-index-url https://download.pytorch.org/whl/cu121 \
+    && pip show requests
 
 # Рабочая папка
 WORKDIR /src
