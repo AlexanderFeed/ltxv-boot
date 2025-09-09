@@ -237,7 +237,8 @@ def handler(job):
 
     frames_norm = [_to_hwc_uint8(fr) for fr in frames]
 
-    print("[SAVE] writing mp4 to temp & returning base64...", flush=True)
+    # --- Сохранение во временный файл и формирование data:URL ---
+    print("[SAVE] writing mp4 to temp & returning data:URL...", flush=True)
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
         export_to_video(frames_norm, out_path)
@@ -245,18 +246,21 @@ def handler(job):
         with open(out_path, "rb") as f:
             video_bytes = f.read()
 
+    import base64
     video_b64 = base64.b64encode(video_bytes).decode("ascii")
-    preview = video_b64[:256] + "..."
-    print(f"[VIDEO DATA-URL PREVIEW] data:video/mp4;base64,{preview} (len={len(video_b64)})", flush=True)
+    data_url = f"data:video/mp4;base64,{video_b64}"
 
-    # ничего не сохраняем “на диск” надолго; tmp удалится сам
+    # Лог — только короткий префикс, чтобы не спамить
+    print(f"[VIDEO DATA-URL] {data_url[:120]}... (len={len(data_url)})", flush=True)
+
     return {
-        "video_base64": video_b64,
+        "video_data_url": data_url,   # ← кликабельная строка
         "mime": "video/mp4",
         "width": w,
         "height": h,
         "frames": len(frames_norm)
     }
+
 
 # ----------------------------
 # Safe wrapper
