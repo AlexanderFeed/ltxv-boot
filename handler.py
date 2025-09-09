@@ -265,7 +265,7 @@ def handler(job):
             output_type="pil",  # сразу numpy кадры
         )
         frames = out.frames
-        frames = [np.array(f) for f in out.frames]
+        
 
     # нормализация к списку HxWxC uint8
     if isinstance(frames, np.ndarray) and frames.ndim == 4:
@@ -277,7 +277,7 @@ def handler(job):
     print("[SAVE] writing mp4 to temp & returning data:URL...", flush=True)
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
-        export_to_video(frames, out_path, fps=DEFAULT_FPS)
+        export_to_video(frames_norm, out_path, fps=DEFAULT_FPS)
         with open(out_path, "rb") as f:
             video_bytes = f.read()
 
