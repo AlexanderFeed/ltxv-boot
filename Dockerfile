@@ -27,4 +27,4 @@ WORKDIR /src
 COPY handler.py /src/handler.py
 
 # Запуск serverless-воркера
-CMD ["python", "handler.py"]
+CMD ["python3", "handler.py"]
