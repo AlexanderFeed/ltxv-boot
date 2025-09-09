@@ -267,19 +267,15 @@ def handler(job):
         frames = out.frames
         
 
-    # нормализация к списку HxWxC uint8
-    if isinstance(frames, np.ndarray) and frames.ndim == 4:
-        frames_iter = [frames[i] for i in range(frames.shape[0])]
-    else:
-        frames_iter = frames
-    frames_norm = [_to_hwc_uint8(fr) for fr in frames_iter]
-    
     if isinstance(frames, np.ndarray):
+        if frames.ndim == 5 and frames.shape[0] == 1:
+            # (1, T, H, W, C) → (T, H, W, C)
+            frames = frames[0]
         if frames.ndim == 4:
             # (T, H, W, C) → список кадров
             frames_iter = [frames[i] for i in range(frames.shape[0])]
         elif frames.ndim == 3:
-            # (T, H, W) без каналов — нужно добавить 1
+            # (T, H, W) → добавить канал
             frames_iter = [np.repeat(frames[i, :, :, None], 3, axis=2) for i in range(frames.shape[0])]
         else:
             raise ValueError(f"Unexpected frame shape: {frames.shape}")
@@ -288,6 +284,7 @@ def handler(job):
 
     frames_norm = [_to_hwc_uint8(fr) for fr in frames_iter]
     print("[DEBUG] first frame shape:", frames_norm[0].shape, frames_norm[0].dtype, flush=True)
+
 
     
 
