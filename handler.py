@@ -127,6 +127,7 @@ def handler(job):
         num_frames=num_frames,
     )
 
+    conditioning_mask = torch.zeros((1, h, w), dtype=torch.float32, device=device)
 
     gen = torch.Generator(device=device).manual_seed(seed)
 
@@ -141,7 +142,9 @@ def handler(job):
         num_inference_steps=steps,
         generator=gen,
         output_type="latent",
+        conditioning_mask=conditioning_mask,   # ← добавили
     )
+
     latents = out.frames
 
     # Апскейл (если доступен)
