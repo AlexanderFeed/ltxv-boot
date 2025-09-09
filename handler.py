@@ -52,34 +52,41 @@ def _make_blank_video(h: int, w: int) -> str:
     blank = np.zeros((h, w, 3), dtype=np.uint8)
     return _export_single_frame_video(blank)
 
-def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
+def _cond_with_mask(video_tensor):
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
-    # Базовая форма маски; при необходимости можно сменить на (1,h,w) или (num_frames,h,w)
-    cond.mask = torch.zeros((h, w), dtype=torch.float32)
+    cond.mask = None  # можно без маски; если нужна — см. ниже
     return [cond]
+
+def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = 8) -> str:
+    # делаем mp4 длиной num_frames из одной картинки
+    frames = [img] * num_frames
+    with tempfile.TemporaryDirectory() as td:
+        out_path = os.path.join(td, "cond.mp4")
+        export_to_video(frames, out_path, fps=fps)
+        with open(out_path, "rb") as f:
+            return _save_bytes_to_tmp(".mp4", f.read())
 
 def _load_condition(init_image_url: str | None,
                     init_video_url: str | None,
-                    h: int,
-                    w: int,
                     num_frames: int):
+    # Видео-кондишн пришёл — используем как есть
     if init_video_url:
         resp = requests.get(init_video_url, stream=True); resp.raise_for_status()
         vpath = _save_bytes_to_tmp(".mp4", resp.content)
         v = load_video(vpath)
-        return _cond_with_mask(v, h, w, num_frames)
+        return _cond_with_mask(v)
 
+    # Картинка — разворачиваем в видео нужной длины
     if init_image_url:
         resp = requests.get(init_image_url, stream=True); resp.raise_for_status()
         img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-        frame = np.array(img)
-        vpath = _export_single_frame_video(frame)
+        vpath = _repeat_image_to_video(img, num_frames)
         v = load_video(vpath)
-        return _cond_with_mask(v, h, w, num_frames)
+        return _cond_with_mask(v)
 
-    vpath = _make_blank_video(h, w)
-    v = load_video(vpath)
-    return _cond_with_mask(v, h, w, num_frames)
+    # Кондишна нет вообще — возвращаем пустой список
+    return []
+
 
 def _to_hwc_uint8(frame):
     import numpy as _np
@@ -131,7 +138,7 @@ def init_pipes():
         return
 
     print(f"[INIT] loading base model: {BASE_MODEL}", flush=True)
-    pipe = LTXConditionPipeline.from_pretrained(BASE_MODEL, dtype=dtype)
+    pipe = LTXConditionPipeline.from_pretrained(BASE_MODEL, torch_dtype=dtype)
     pipe.to(device)
     if hasattr(pipe, "vae") and hasattr(pipe.vae, "enable_tiling"):
         pipe.vae.enable_tiling()
@@ -145,9 +152,7 @@ def init_pipes():
 
     try:
         print(f"[INIT] loading upsampler: {UPSAMPLER}", flush=True)
-        pipe_up = LTXLatentUpsamplePipeline.from_pretrained(
-            UPSAMPLER, vae=pipe.vae, dtype=dtype
-        )
+        pipe_up = LTXLatentUpsamplePipeline.from_pretrained(UPSAMPLER, vae=pipe.vae, torch_dtype=dtype)
         pipe_up.to(device)
         print("[INIT] upsampler loaded", flush=True)
     except Exception as e:
@@ -181,11 +186,12 @@ def handler(job):
     conditions = _load_condition(
         init_image_url=inp.get("init_image_url"),
         init_video_url=inp.get("init_video_url"),
-        h=h, w=w, num_frames=num_frames,
+        num_frames=num_frames,
     )
 
     gen = torch.Generator(device=device).manual_seed(seed)
 
+    print(f"[GEN] num_frames requested: {num_frames}", flush=True)
     print("[GEN] generating...", flush=True)
     if do_upsample and pipe_up is not None:
         out = pipe(
@@ -252,6 +258,7 @@ def handler(job):
 
     # Лог — только короткий префикс, чтобы не спамить
     print(f"[VIDEO DATA-URL] {data_url[:120]}... (len={len(data_url)})", flush=True)
+    print(f"[RESULT] frames produced: {len(frames_norm)}", flush=True)
 
     return {
         "video_data_url": data_url,   # ← кликабельная строка
