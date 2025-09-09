@@ -1,15 +1,14 @@
-import os, io, tempfile 
-import requests 
+import os, io, tempfile
+import requests
 import runpod
 from huggingface_hub import login
 import torch
+import numpy as np
 from PIL import Image
-from diffusers import (
-    LTXConditionPipeline, LTXLatentUpsamplePipeline
-)
+from diffusers import LTXConditionPipeline, LTXLatentUpsamplePipeline
 from diffusers.pipelines.ltx.pipeline_ltx_condition import LTXVideoCondition
 from diffusers.utils import export_to_video, load_video
-
+from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from runpod.serverless.utils import rp_upload
 
 # HF auth (если нужен токен)
@@ -17,9 +16,9 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 if HF_TOKEN:
     login(token=HF_TOKEN, add_to_git_credential=False)
 
-# Модель по умолчанию
-BASE_MODEL = os.getenv("LTX_MODEL", "Lightricks/LTX-Video-0.9.8-dev")
-UPSAMPLER  = os.getenv("LTX_UPSAMPLER", "Lightricks/ltxv-spatial-upscaler-0.9.8")
+# Модели по умолчанию (можно переопределить в env)
+BASE_MODEL = os.getenv("LTX_MODEL", "Lightricks/LTX-Video")
+UPSAMPLER  = os.getenv("LTX_UPSAMPLER", "Lightricks/ltxv-spatial-upscaler-0.9.7")
 
 dtype = torch.bfloat16
 device = "cuda"
@@ -31,18 +30,32 @@ pipe_up = None
 def init_pipes():
     """Ленивая инициализация пайплайнов"""
     global pipe, pipe_up
-    if pipe is None:
-        pipe = LTXConditionPipeline.from_pretrained(BASE_MODEL, torch_dtype=dtype)
-        pipe.to(device)
-        pipe.vae.enable_tiling()
+    if pipe is not None:
+        return
 
-        try:
-            pipe_up = LTXLatentUpsamplePipeline.from_pretrained(
-                UPSAMPLER, vae=pipe.vae, torch_dtype=dtype
-            )
-            pipe_up.to(device)
-        except Exception:
-            pipe_up = None
+    print(f"[INIT] loading base model: {BASE_MODEL}", flush=True)
+    pipe = LTXConditionPipeline.from_pretrained(BASE_MODEL, torch_dtype=dtype)
+    pipe.to(device)
+    pipe.vae.enable_tiling()
+
+    # 🔧 ВАРИАНТ A: отключаем dynamic shifting, чтобы не требовался mu
+    try:
+        if isinstance(pipe.scheduler, FlowMatchEulerDiscreteScheduler):
+            pipe.scheduler.register_to_config(use_dynamic_shifting=False)
+            print("[INIT] scheduler.use_dynamic_shifting = False", flush=True)
+    except Exception as e:
+        print("[INIT] scheduler tweak skipped:", e, flush=True)
+
+    try:
+        print(f"[INIT] loading upsampler: {UPSAMPLER}", flush=True)
+        pipe_up = LTXLatentUpsamplePipeline.from_pretrained(
+            UPSAMPLER, vae=pipe.vae, torch_dtype=dtype
+        )
+        pipe_up.to(device)
+        print("[INIT] upsampler loaded", flush=True)
+    except Exception as e:
+        print("[INIT] upsampler skipped:", e, flush=True)
+        pipe_up = None
 
 
 def _round_to_vae(h, w, ratio):
@@ -50,40 +63,44 @@ def _round_to_vae(h, w, ratio):
 
 
 def _load_condition(init_image_url=None, init_video_url=None):
-    """Скачиваем картинку/видео по URL и конвертим в LTXVideoCondition"""
+    """Скачиваем по URL и подаем как LTXVideoCondition."""
     if init_video_url:
         resp = requests.get(init_video_url, stream=True)
         resp.raise_for_status()
-        tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
-        with open(tmp.name, "wb") as f:
-            f.write(resp.content)
-        v = load_video(tmp.name)
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp.write(resp.content)
+            tmp_path = tmp.name
+        v = load_video(tmp_path)
         return [LTXVideoCondition(video=v, frame_index=0)]
 
     if init_image_url:
         resp = requests.get(init_image_url, stream=True)
         resp.raise_for_status()
         img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-        tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-        img.save(tmp.name)
-        v = load_video(export_to_video([img]))
+
+        # Видео из одного кадра: сохраняем на диск → затем load_video
+        frame = np.array(img)
+        with tempfile.TemporaryDirectory() as td:
+            out_path = os.path.join(td, "cond.mp4")
+            export_to_video([frame], out_path)
+            v = load_video(out_path)
         return [LTXVideoCondition(video=v, frame_index=0)]
 
     return []
 
 
 def handler(job):
-    """Основной handler"""
-    init_pipes()  # лениво загружаем модель
+    init_pipes()
 
-    inp = job["input"]
+    inp = job.get("input", {}) or {}
+    print("[JOB] input keys:", list(inp.keys()), flush=True)
 
     prompt = inp.get("prompt", "")
     negative_prompt = inp.get("negative_prompt", "worst quality, blurry, jittery")
 
     height = int(inp.get("height", 480))
-    width = int(inp.get("width", 832))
-    steps = int(inp.get("steps", 30))
+    width  = int(inp.get("width", 832))
+    steps  = int(inp.get("steps", 30))
     num_frames = int(inp.get("num_frames", 97))
     seed = int(inp.get("seed", 0))
     do_upsample = bool(inp.get("upsample", False))
@@ -101,7 +118,7 @@ def handler(job):
     gen = torch.Generator(device=device).manual_seed(seed)
 
     # Генерация в латентах
-    latents = pipe(
+    out = pipe(
         conditions=conditions,
         prompt=prompt,
         negative_prompt=negative_prompt,
@@ -111,9 +128,10 @@ def handler(job):
         num_inference_steps=steps,
         generator=gen,
         output_type="latent",
-    ).frames
+    )
+    latents = out.frames
 
-    # Апскейл
+    # Апскейл (если доступен)
     if do_upsample and pipe_up is not None:
         latents = pipe_up(latents=latents, output_type="latent").frames
 
@@ -121,9 +139,18 @@ def handler(job):
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
         export_to_video(latents, out_path)  # imageio[ffmpeg]
-
         url = rp_upload.upload_file(job["id"], out_path)
         return {"video_url": url, "width": w, "height": h, "frames": len(latents)}
 
 
-runpod.serverless.start({"handler": handler})
+# safe-обёртка: вместо exit code 1 вернём traceback в output
+def _safe(job):
+    try:
+        return handler(job)
+    except Exception as e:
+        import traceback, sys
+        tb = traceback.format_exc()
+        print(tb, file=sys.stderr)
+        return {"error": str(e), "traceback": tb}
+
+runpod.serverless.start({"handler": _safe})
