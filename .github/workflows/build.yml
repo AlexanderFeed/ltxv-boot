@@ -20,4 +20,4 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/alexanderfeed/ltx-boot:v27
+          tags: ghcr.io/alexanderfeed/ltx-boot:v28

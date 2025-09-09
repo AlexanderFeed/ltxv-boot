@@ -67,7 +67,7 @@ def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     # маска нулей в латентном масштабе (после VAE downsample)
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h_lat, w_lat = max(1, h // ratio), max(1, w // ratio)
-    mask = torch.ones((num_frames, h_lat, w_lat), dtype=torch.float32)  # CPU ок
+    mask = torch.zeros((num_frames, h_lat, w_lat), dtype=torch.float32)  # CPU ок
     # важные поля, на которые ссылается пайплайн
     cond.conditioning_mask = mask
     cond.mask = mask
