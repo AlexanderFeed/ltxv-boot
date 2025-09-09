@@ -54,11 +54,20 @@ def _make_blank_video(h: int, w: int) -> str:
 
 def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
+
     # маска нулей в латентном масштабе (после VAE downsample)
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h_lat, w_lat = max(1, h // ratio), max(1, w // ratio)
-    cond.mask = torch.zeros((num_frames, h_lat, w_lat), dtype=torch.float32, device=device)
+    mask = torch.zeros((num_frames, h_lat, w_lat), dtype=torch.float32)  # CPU ок
+
+    # !!! ключевая строка: у LTX-пайплайна поле называется conditioning_mask
+    cond.conditioning_mask = mask
+
+    # на всякий случай продублируем и в mask
+    cond.mask = mask
+
     return [cond]
+
 
 def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = 8) -> str:
     frames = [img] * num_frames
