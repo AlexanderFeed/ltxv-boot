@@ -67,7 +67,7 @@ def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     # маска нулей в латентном масштабе (после VAE downsample)
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h_lat, w_lat = max(1, h // ratio), max(1, w // ratio)
-    mask = torch.zeros((num_frames, h_lat, w_lat), dtype=torch.float32)  # CPU ок
+    mask = torch.ones((num_frames, h_lat, w_lat), dtype=torch.float32)  # CPU ок
     # важные поля, на которые ссылается пайплайн
     cond.conditioning_mask = mask
     cond.mask = mask
@@ -262,7 +262,7 @@ def handler(job):
             num_frames=num_frames,
             num_inference_steps=steps,
             generator=gen,
-            output_type="np",  # сразу numpy кадры
+            output_type="pil",  # сразу numpy кадры
         )
         frames = out.frames
 
@@ -276,7 +276,7 @@ def handler(job):
     print("[SAVE] writing mp4 to temp & returning data:URL...", flush=True)
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
-        export_to_video(frames_norm, out_path, fps=DEFAULT_FPS)
+        export_to_video(frames, out_path, fps=DEFAULT_FPS)
         with open(out_path, "rb") as f:
             video_bytes = f.read()
 
