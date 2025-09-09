@@ -17,6 +17,8 @@ COPY requirements.txt /src/requirements.txt
 RUN pip install --no-cache-dir -r /src/requirements.txt \
     --extra-index-url https://download.pytorch.org/whl/cu121 \
     && pip show requests
+    
+RUN pip install runpod requests
 
 # Рабочая папка
 WORKDIR /src
@@ -25,4 +27,4 @@ WORKDIR /src
 COPY handler.py /src/handler.py
 
 # Запуск serverless-воркера
-CMD ["python3", "handler.py"]
+CMD ["python", "handler.py"]
