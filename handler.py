@@ -20,13 +20,15 @@ if HF_TOKEN:
     login(token=HF_TOKEN, add_to_git_credential=False)
 
 BASE_MODEL = os.getenv("LTX_MODEL", "Lightricks/LTX-Video")
-UPSAMPLER = os.getenv("LTX_UPSAMPLER", "Lightricks/ltxv-spatial-upscaler-0.9.7")
+UPSAMPLER  = os.getenv("LTX_UPSAMPLER", "Lightricks/ltxv-spatial-upscaler-0.9.7")
 
 device = "cuda"
 dtype = torch.bfloat16
 
 pipe = None
 pipe_up = None
+
+DEFAULT_FPS = 8  # fps для экспорта mp4
 
 # ----------------------------
 # Utils
@@ -42,34 +44,37 @@ def _save_bytes_to_tmp(ext: str, content: bytes) -> str:
 def _export_single_frame_video(frame_array: np.ndarray) -> str:
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, "oneframe.mp4")
-        from diffusers.utils import export_to_video as _export
-        _export([frame_array], out_path)
+        export_to_video([frame_array], out_path, fps=DEFAULT_FPS)
         with open(out_path, "rb") as f:
             keep = _save_bytes_to_tmp(".mp4", f.read())
     return keep
 
-def _make_blank_video(h: int, w: int) -> str:
-    blank = np.zeros((h, w, 3), dtype=np.uint8)
-    return _export_single_frame_video(blank)
+def _make_blank_video(h: int, w: int, num_frames: int, fps: int = DEFAULT_FPS) -> str:
+    frame = np.zeros((h, w, 3), dtype=np.uint8)
+    frames = [frame] * num_frames
+    with tempfile.TemporaryDirectory() as td:
+        out_path = os.path.join(td, "blank.mp4")
+        export_to_video(frames, out_path, fps=fps)
+        with open(out_path, "rb") as f:
+            return _save_bytes_to_tmp(".mp4", f.read())
 
 def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
+    """
+    Создаёт LTXVideoCondition и проставляет корректную маску в латентном масштабе.
+    """
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
 
     # маска нулей в латентном масштабе (после VAE downsample)
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h_lat, w_lat = max(1, h // ratio), max(1, w // ratio)
     mask = torch.zeros((num_frames, h_lat, w_lat), dtype=torch.float32)  # CPU ок
-
-    # !!! ключевая строка: у LTX-пайплайна поле называется conditioning_mask
+    # важные поля, на которые ссылается пайплайн
     cond.conditioning_mask = mask
-
-    # на всякий случай продублируем и в mask
     cond.mask = mask
 
     return [cond]
 
-
-def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = 8) -> str:
+def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = DEFAULT_FPS) -> str:
     frames = [img] * num_frames
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, "cond.mp4")
@@ -82,14 +87,18 @@ def _load_condition(init_image_url: str | None,
                     h: int,
                     w: int,
                     num_frames: int):
-    # Видео-кондишн пришёл — используем как есть
+    """
+    Всегда возвращает валидный condition с маской:
+    - video: как есть
+    - image: разворачиваем в видео длины num_frames
+    - none: чёрное видео длины num_frames
+    """
     if init_video_url:
         resp = requests.get(init_video_url, stream=True); resp.raise_for_status()
         vpath = _save_bytes_to_tmp(".mp4", resp.content)
         v = load_video(vpath)
         return _cond_with_mask(v, h, w, num_frames)
 
-    # Картинка — разворачиваем в видео нужной длины
     if init_image_url:
         resp = requests.get(init_image_url, stream=True); resp.raise_for_status()
         img = Image.open(io.BytesIO(resp.content)).convert("RGB")
@@ -97,8 +106,10 @@ def _load_condition(init_image_url: str | None,
         v = load_video(vpath)
         return _cond_with_mask(v, h, w, num_frames)
 
-    # Кондишна нет — возвращаем пустой список
-    return []
+    # нет исходников — даём пустое видео нужной длины
+    vpath = _make_blank_video(h, w, num_frames)
+    v = load_video(vpath)
+    return _cond_with_mask(v, h, w, num_frames)
 
 def _to_hwc_uint8(frame):
     import numpy as _np
@@ -195,7 +206,7 @@ def handler(job):
     if num_frames % 8 != 1:
         num_frames = (num_frames // 8) * 8 + 1
 
-    # загружаем condition (если есть) и кладём корректную mask внутри _cond_with_mask
+    # загружаем/создаём condition (всегда) и кладём корректную mask внутри _cond_with_mask
     conditions = _load_condition(
         init_image_url=inp.get("init_image_url"),
         init_video_url=inp.get("init_video_url"),
@@ -206,6 +217,7 @@ def handler(job):
 
     print(f"[GEN] num_frames requested: {num_frames}", flush=True)
     print("[GEN] generating...", flush=True)
+
     if do_upsample and pipe_up is not None:
         out = pipe(
             conditions=conditions,
@@ -250,16 +262,21 @@ def handler(job):
             num_frames=num_frames,
             num_inference_steps=steps,
             generator=gen,
-            output_type="np",
+            output_type="np",  # сразу numpy кадры
         )
         frames = out.frames
 
-    frames_norm = [_to_hwc_uint8(fr) for fr in frames]
+    # нормализация к списку HxWxC uint8
+    if isinstance(frames, np.ndarray) and frames.ndim == 4:
+        frames_iter = [frames[i] for i in range(frames.shape[0])]
+    else:
+        frames_iter = frames
+    frames_norm = [_to_hwc_uint8(fr) for fr in frames_iter]
 
     print("[SAVE] writing mp4 to temp & returning data:URL...", flush=True)
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
-        export_to_video(frames_norm, out_path)
+        export_to_video(frames_norm, out_path, fps=DEFAULT_FPS)
         with open(out_path, "rb") as f:
             video_bytes = f.read()
 
