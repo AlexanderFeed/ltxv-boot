@@ -62,8 +62,8 @@ def _round_to_vae(h, w, ratio):
     return h - (h % ratio), w - (w % ratio)
 
 
-def _load_condition(init_image_url=None, init_video_url=None):
-    """Скачиваем по URL и подаем как LTXVideoCondition."""
+def _load_condition(init_image_url=None, init_video_url=None, h=None, w=None, num_frames=1):
+    """Возвращаем LTXVideoCondition: URL-видео, URL-картинку или пустой кадр (fallback)."""
     if init_video_url:
         resp = requests.get(init_video_url, stream=True)
         resp.raise_for_status()
@@ -77,8 +77,6 @@ def _load_condition(init_image_url=None, init_video_url=None):
         resp = requests.get(init_image_url, stream=True)
         resp.raise_for_status()
         img = Image.open(io.BytesIO(resp.content)).convert("RGB")
-
-        # Видео из одного кадра: сохраняем на диск → затем load_video
         frame = np.array(img)
         with tempfile.TemporaryDirectory() as td:
             out_path = os.path.join(td, "cond.mp4")
@@ -86,7 +84,18 @@ def _load_condition(init_image_url=None, init_video_url=None):
             v = load_video(out_path)
         return [LTXVideoCondition(video=v, frame_index=0)]
 
-    return []
+    # Fallback: чёрный кадр нужного размера
+    if h is None or w is None:
+        # на всякий случай ставим дефолты
+        h, w = 480, 832
+    blank = np.zeros((h, w, 3), dtype=np.uint8)
+    with tempfile.TemporaryDirectory() as td:
+        out_path = os.path.join(td, "cond_blank.mp4")
+        # одного кадра достаточно, т.к. используем frame_index=0
+        export_to_video([blank], out_path)
+        v = load_video(out_path)
+    return [LTXVideoCondition(video=v, frame_index=0)]
+
 
 
 def handler(job):
@@ -113,7 +122,11 @@ def handler(job):
     conditions = _load_condition(
         init_image_url=inp.get("init_image_url"),
         init_video_url=inp.get("init_video_url"),
+        h=h,
+        w=w,
+        num_frames=num_frames,
     )
+
 
     gen = torch.Generator(device=device).manual_seed(seed)
 
