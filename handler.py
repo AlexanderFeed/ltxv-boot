@@ -52,13 +52,15 @@ def _make_blank_video(h: int, w: int) -> str:
     blank = np.zeros((h, w, 3), dtype=np.uint8)
     return _export_single_frame_video(blank)
 
-def _cond_with_mask(video_tensor):
+def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
-    cond.mask = None  # можно без маски; если нужна — см. ниже
+    # маска нулей в латентном масштабе (после VAE downsample)
+    ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
+    h_lat, w_lat = max(1, h // ratio), max(1, w // ratio)
+    cond.mask = torch.zeros((num_frames, h_lat, w_lat), dtype=torch.float32, device=device)
     return [cond]
 
 def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = 8) -> str:
-    # делаем mp4 длиной num_frames из одной картинки
     frames = [img] * num_frames
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, "cond.mp4")
@@ -68,13 +70,15 @@ def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = 8) -> s
 
 def _load_condition(init_image_url: str | None,
                     init_video_url: str | None,
+                    h: int,
+                    w: int,
                     num_frames: int):
     # Видео-кондишн пришёл — используем как есть
     if init_video_url:
         resp = requests.get(init_video_url, stream=True); resp.raise_for_status()
         vpath = _save_bytes_to_tmp(".mp4", resp.content)
         v = load_video(vpath)
-        return _cond_with_mask(v)
+        return _cond_with_mask(v, h, w, num_frames)
 
     # Картинка — разворачиваем в видео нужной длины
     if init_image_url:
@@ -82,11 +86,10 @@ def _load_condition(init_image_url: str | None,
         img = Image.open(io.BytesIO(resp.content)).convert("RGB")
         vpath = _repeat_image_to_video(img, num_frames)
         v = load_video(vpath)
-        return _cond_with_mask(v)
+        return _cond_with_mask(v, h, w, num_frames)
 
-    # Кондишна нет вообще — возвращаем пустой список
+    # Кондишна нет — возвращаем пустой список
     return []
-
 
 def _to_hwc_uint8(frame):
     import numpy as _np
@@ -105,7 +108,6 @@ def _to_hwc_uint8(frame):
     if f.ndim == 2:
         f = f[:, :, None]
     elif f.ndim == 3:
-        # если (C,H,W) — в (H,W,C)
         if f.shape[0] in (1, 3, 4) and (f.shape[1] != f.shape[-2] or f.shape[2] != f.shape[-1]):
             f = _np.transpose(f, (1, 2, 0))
     else:
@@ -123,10 +125,8 @@ def _to_hwc_uint8(frame):
 
     if f.shape[2] == 1:
         f = _np.repeat(f, 3, axis=2)
-
     if f.shape[2] > 4:
         f = f[:, :, :3]
-
     return f
 
 # ----------------------------
@@ -152,7 +152,9 @@ def init_pipes():
 
     try:
         print(f"[INIT] loading upsampler: {UPSAMPLER}", flush=True)
-        pipe_up = LTXLatentUpsamplePipeline.from_pretrained(UPSAMPLER, vae=pipe.vae, torch_dtype=dtype)
+        pipe_up = LTXLatentUpsamplePipeline.from_pretrained(
+            UPSAMPLER, vae=pipe.vae, torch_dtype=dtype
+        )
         pipe_up.to(device)
         print("[INIT] upsampler loaded", flush=True)
     except Exception as e:
@@ -178,15 +180,17 @@ def handler(job):
     seed = int(inp.get("seed", 0))
     do_upsample = bool(inp.get("upsample", False))
 
+    # округления до VAE-сетки и 8n+1
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h, w = _round_to_vae(height, width, ratio)
     if num_frames % 8 != 1:
         num_frames = (num_frames // 8) * 8 + 1
 
+    # загружаем condition (если есть) и кладём корректную mask внутри _cond_with_mask
     conditions = _load_condition(
         init_image_url=inp.get("init_image_url"),
         init_video_url=inp.get("init_video_url"),
-        num_frames=num_frames,
+        h=h, w=w, num_frames=num_frames,
     )
 
     gen = torch.Generator(device=device).manual_seed(seed)
@@ -243,31 +247,26 @@ def handler(job):
 
     frames_norm = [_to_hwc_uint8(fr) for fr in frames]
 
-    # --- Сохранение во временный файл и формирование data:URL ---
     print("[SAVE] writing mp4 to temp & returning data:URL...", flush=True)
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
         export_to_video(frames_norm, out_path)
-
         with open(out_path, "rb") as f:
             video_bytes = f.read()
 
-    import base64
     video_b64 = base64.b64encode(video_bytes).decode("ascii")
     data_url = f"data:video/mp4;base64,{video_b64}"
 
-    # Лог — только короткий префикс, чтобы не спамить
     print(f"[VIDEO DATA-URL] {data_url[:120]}... (len={len(data_url)})", flush=True)
     print(f"[RESULT] frames produced: {len(frames_norm)}", flush=True)
 
     return {
-        "video_data_url": data_url,   # ← кликабельная строка
+        "video_data_url": data_url,
         "mime": "video/mp4",
         "width": w,
         "height": h,
         "frames": len(frames_norm)
     }
-
 
 # ----------------------------
 # Safe wrapper
