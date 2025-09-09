@@ -262,7 +262,7 @@ def handler(job):
             num_frames=num_frames,
             num_inference_steps=steps,
             generator=gen,
-            output_type="pil",  # сразу numpy кадры
+            output_type="np",  # сразу numpy кадры
         )
         frames = out.frames
         
@@ -273,6 +273,23 @@ def handler(job):
     else:
         frames_iter = frames
     frames_norm = [_to_hwc_uint8(fr) for fr in frames_iter]
+    
+    if isinstance(frames, np.ndarray):
+        if frames.ndim == 4:
+            # (T, H, W, C) → список кадров
+            frames_iter = [frames[i] for i in range(frames.shape[0])]
+        elif frames.ndim == 3:
+            # (T, H, W) без каналов — нужно добавить 1
+            frames_iter = [np.repeat(frames[i, :, :, None], 3, axis=2) for i in range(frames.shape[0])]
+        else:
+            raise ValueError(f"Unexpected frame shape: {frames.shape}")
+    else:
+        frames_iter = frames
+
+    frames_norm = [_to_hwc_uint8(fr) for fr in frames_iter]
+    print("[DEBUG] first frame shape:", frames_norm[0].shape, frames_norm[0].dtype, flush=True)
+
+    
 
     print("[SAVE] writing mp4 to temp & returning data:URL...", flush=True)
     with tempfile.TemporaryDirectory() as td:
