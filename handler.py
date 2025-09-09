@@ -174,35 +174,73 @@ def handler(job):
 
     gen = torch.Generator(device=device).manual_seed(seed)
 
-    # Generate latent video
-    print("[GEN] generating latents...", flush=True)
-    out = pipe(
-        conditions=conditions,
-        prompt=prompt,
-        negative_prompt=negative_prompt,
-        width=w,
-        height=h,
-        num_frames=num_frames,
-        num_inference_steps=steps,
-        generator=gen,
-        output_type="latent",
-    )
-    latents = out.frames
+    # --- Генерация / декодирование ---
+    print("[GEN] generating...", flush=True)
 
-    # Optional latent upsample
     if do_upsample and pipe_up is not None:
+        # 1) генерим латенты
+        out = pipe(
+            conditions=conditions,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=w,
+            height=h,
+            num_frames=num_frames,
+            num_inference_steps=steps,
+            generator=gen,
+            output_type="latent",
+        )
+        latents = out.frames
+
+        # 2) апскейлим в латентах
         print("[GEN] latent upsample...", flush=True)
         latents = pipe_up(latents=latents, output_type="latent").frames
 
-    # Decode & upload
-    print("[SAVE] decoding & uploading...", flush=True)
+        # 3) декодируем латенты в пиксели (numpy)
+        print("[GEN] decoding latents...", flush=True)
+        try:
+            frames = pipe.decode_latents(latents)  # вернёт список np.ndarray (H,W,3) [0..255]
+        except Exception:
+            # Fallback на случай другой версии diffusers: руками через VAE
+            with torch.no_grad():
+                t = latents
+                if isinstance(t, list):  # некоторые ревизии возвращают список тензоров
+                    t = torch.stack(t, dim=0)
+                t = t.to(device=device, dtype=torch.float32)
+                if t.dim() == 5:
+                    # (B, T, C, H, W) -> (B*T, C, H, W)
+                    b, tt, c, hh, ww = t.shape
+                    t = t.reshape(b * tt, c, hh, ww)
+                scal = getattr(getattr(pipe, "vae", object), "config", object).__dict__.get("scaling_factor", 0.18215)
+                imgs = pipe.vae.decode(t / scal).sample
+                imgs = (imgs.clamp(-1, 1) + 1) / 2
+                imgs = (imgs * 255).round().to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
+                frames = [f for f in imgs]  # список np.ndarray
+    else:
+        # Без апскейла — сразу просим numpy-кадры
+        out = pipe(
+            conditions=conditions,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=w,
+            height=h,
+            num_frames=num_frames,
+            num_inference_steps=steps,
+            generator=gen,
+            output_type="np",  # <— сразу numpy
+        )
+        frames = out.frames  # список np.ndarray (H,W,3)
+
+    # --- Сохранение и загрузка ---
+    print("[SAVE] writing video...", flush=True)
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
-        export_to_video(latents, out_path)  # requires imageio[ffmpeg]
+        export_to_video(frames, out_path)  # теперь frames — список np.ndarray
         url = rp_upload.upload_file(job["id"], out_path)
 
     print("[DONE]", url, flush=True)
-    return {"video_url": url, "width": w, "height": h, "frames": len(latents)}
+    return {"video_url": url, "width": w, "height": h, "frames": len(frames)}
+
 
 
 # Safe wrapper: return tracebacks in output instead of exit 1
