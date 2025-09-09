@@ -67,9 +67,8 @@ def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     to avoid None-path crashes inside the pipeline.
     """
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
-
-    # Базовая форма маски: (H, W). Если конкретная ревизия попросит иную форму,
-    # можно быстро заменить на (1, H, W) или (num_frames, H, W).
+    # Базовая форма маски: (H, W). Если ревизия попросит иную форму —
+    # поменять на (1, H, W) или (num_frames, H, W).
     cond.mask = torch.zeros((h, w), dtype=torch.float32)
     return [cond]
 
@@ -128,7 +127,7 @@ def _to_hwc_uint8(frame):
         f = f[:, :, None]
     elif f.ndim == 3:
         # если формат C,H,W — перенесём в H,W,C
-        if f.shape[0] in (1, 3, 4) and f.shape[1] != f.shape[-2]:
+        if f.shape[0] in (1, 3, 4) and (f.shape[1] != f.shape[-2] or f.shape[2] != f.shape[-1]):
             f = _np.transpose(f, (1, 2, 0))
     else:
         # неожиданные формы — сведём к одноканальной
@@ -155,6 +154,42 @@ def _to_hwc_uint8(frame):
         f = f[:, :, :3]
 
     return f
+
+
+def _s3_upload(local_path: str, filename: str) -> str:
+    """
+    Резервная загрузка в S3-совместимое хранилище через boto3.
+    Требуются env:
+      BUCKET_NAME (обязательно)
+      AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY (или IAM роль)
+      BUCKET_ENDPOINT (если не AWS S3)
+      AWS_DEFAULT_REGION (если нужно)
+      PUBLIC_BASE_URL (опционально, если бакет публичный)
+    """
+    import boto3
+
+    bucket = os.environ["BUCKET_NAME"]
+    key = f"ltx/{filename}"
+    endpoint = os.getenv("BUCKET_ENDPOINT")
+    region = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+
+    s3 = boto3.client("s3", endpoint_url=endpoint, region_name=region)
+    s3.upload_file(
+        local_path,
+        bucket,
+        key,
+        ExtraArgs={"ContentType": "video/mp4", "ACL": "public-read"},
+    )
+
+    public_base = os.getenv("PUBLIC_BASE_URL")
+    if public_base:
+        return f"{public_base.rstrip('/')}/{key}"
+    # иначе вернем presigned URL на 7 дней
+    return s3.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=7 * 24 * 3600,
+    )
 
 
 # ----------------------------
@@ -262,7 +297,6 @@ def handler(job):
                 if t.dim() == 5:
                     b, tt, c, hh, ww = t.shape
                     t = t.reshape(b * tt, c, hh, ww)
-                # попытка взять scaling_factor из VAE-конфига
                 scal = getattr(getattr(pipe, "vae", object), "config", object).__dict__.get("scaling_factor", 0.18215)
                 imgs = pipe.vae.decode(t / scal).sample
                 imgs = (imgs.clamp(-1, 1) + 1) / 2
@@ -279,9 +313,9 @@ def handler(job):
             num_frames=num_frames,
             num_inference_steps=steps,
             generator=gen,
-            output_type="np",  # сразу кадры np.ndarray
+            output_type="np",
         )
-        frames = out.frames  # список np.ndarray (H,W,3) или совместимых
+        frames = out.frames  # список np.ndarray
 
     # Нормализация кадров к HxWxC uint8
     frames_norm = [_to_hwc_uint8(fr) for fr in frames]
@@ -291,7 +325,13 @@ def handler(job):
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
         export_to_video(frames_norm, out_path)  # imageio[ffmpeg]
-        url = rp_upload.upload_file(job["id"], out_path)
+
+        # сначала пробуем штатный ранпод-аплоад
+        try:
+            url = rp_upload.upload_image(f"{job['id']}.mp4", out_path)
+        except Exception as e:
+            print("[SAVE] rp_upload.upload_image failed, falling back to boto3:", e, flush=True)
+            url = _s3_upload(out_path, filename=f"{job['id']}.mp4")
 
     print("[DONE]", url, flush=True)
     return {"video_url": url, "width": w, "height": h, "frames": len(frames_norm)}
