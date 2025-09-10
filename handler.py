@@ -44,20 +44,24 @@ def _save_bytes_to_tmp(ext: str, content: bytes) -> str:
 def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     """
     Создаёт LTXVideoCondition и проставляет маску в латентном масштабе.
-    ВАЖНО: эту функцию вызываем только если действительно есть conditioning.
     """
+    # Приводим к формату (T, C, H, W)
+    if video_tensor.ndim == 4 and video_tensor.shape[-1] in (1, 3, 4):
+        # (T, H, W, C) → (T, C, H, W)
+        video_tensor = video_tensor.permute(0, 3, 1, 2)
+
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
 
     # размерность в латентном масштабе
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h_lat, w_lat = max(1, h // ratio), max(1, w // ratio)
 
-    # mask формы (T, 1, H_lat, W_lat). 0 — «не шумить» (сильнее учитывать conditioning)
     mask = torch.zeros((num_frames, 1, h_lat, w_lat), dtype=torch.float32)
     cond.conditioning_mask = mask
     cond.mask = mask
 
     return [cond]
+
 
 def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = DEFAULT_FPS) -> str:
     frames = [img] * num_frames
