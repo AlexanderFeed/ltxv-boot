@@ -41,37 +41,13 @@ def _save_bytes_to_tmp(ext: str, content: bytes) -> str:
         tmp.write(content)
         return tmp.name
 
-def _export_single_frame_video(frame_array: np.ndarray) -> str:
-    with tempfile.TemporaryDirectory() as td:
-        out_path = os.path.join(td, "oneframe.mp4")
-        export_to_video([frame_array], out_path, fps=DEFAULT_FPS)
-        with open(out_path, "rb") as f:
-            keep = _save_bytes_to_tmp(".mp4", f.read())
-    return keep
-
-def _make_blank_video(h: int, w: int, num_frames: int, fps: int = DEFAULT_FPS) -> str:
-    frame = np.zeros((h, w, 3), dtype=np.uint8)
-    frames = [frame] * num_frames
-    with tempfile.TemporaryDirectory() as td:
-        out_path = os.path.join(td, "blank.mp4")
-        export_to_video(frames, out_path, fps=fps)
-        with open(out_path, "rb") as f:
-            return _save_bytes_to_tmp(".mp4", f.read())
-
 def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
-    """
-    Создаёт LTXVideoCondition и проставляет корректную маску в латентном масштабе.
-    """
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
-
-    # маска нулей в латентном масштабе (после VAE downsample)
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h_lat, w_lat = max(1, h // ratio), max(1, w // ratio)
-    mask = torch.zeros((num_frames, h_lat, w_lat), dtype=torch.float32)  # CPU ок
-    # важные поля, на которые ссылается пайплайн
+    mask = torch.zeros((num_frames, h_lat, w_lat), dtype=torch.float32)
     cond.conditioning_mask = mask
     cond.mask = mask
-
     return [cond]
 
 def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = DEFAULT_FPS) -> str:
@@ -96,9 +72,8 @@ def _load_condition(init_image_url, init_video_url, h, w, num_frames):
         v = load_video(vpath)
         return _cond_with_mask(v, h, w, num_frames)
 
-    # <<< ВАЖНО: если кондишна нет — ничего не подсовываем >>>
+    # если кондишна нет — возвращаем пустой список
     return []
-
 
 def _to_hwc_uint8(frame):
     import numpy as _np
@@ -106,32 +81,22 @@ def _to_hwc_uint8(frame):
 
     if isinstance(frame, _PILImage.Image):
         frame = _np.array(frame)
-
     if isinstance(frame, torch.Tensor):
         f = frame.detach().cpu().numpy()
     else:
         f = _np.asarray(frame)
-
     f = _np.squeeze(f)
 
     if f.ndim == 2:
         f = f[:, :, None]
     elif f.ndim == 3:
-        if f.shape[0] in (1, 3, 4) and (f.shape[1] != f.shape[-2] or f.shape[2] != f.shape[-1]):
+        if f.shape[0] in (1, 3, 4):
             f = _np.transpose(f, (1, 2, 0))
-    else:
-        f = f.reshape(f.shape[0], f.shape[1], -1)[:, :, :1]
-
     if _np.issubdtype(f.dtype, _np.floating):
-        f_min, f_max = f.min(), f.max()
-        if f_min >= -1.0 - 1e-3 and f_max <= 1.0 + 1e-3:
-            f = (_np.clip(f, -1, 1) + 1.0) * 127.5
-        else:
-            f = _np.clip(f, 0.0, 255.0)
-        f = _np.round(f).astype(_np.uint8)
+        f = (_np.clip(f, -1, 1) + 1.0) * 127.5
+        f = np.round(f).astype(np.uint8)
     elif f.dtype != _np.uint8:
-        f = _np.clip(f, 0, 255).astype(_np.uint8)
-
+        f = _np.clip(f, 0, 255).astype(np.uint8)
     if f.shape[2] == 1:
         f = _np.repeat(f, 3, axis=2)
     if f.shape[2] > 4:
@@ -175,13 +140,11 @@ def init_pipes():
 # ----------------------------
 def handler(job):
     init_pipes()
-
     inp = job.get("input", {}) or {}
     print("[JOB] input keys:", list(inp.keys()), flush=True)
 
     prompt = inp.get("prompt", "")
     negative_prompt = inp.get("negative_prompt", "worst quality, blurry, jittery")
-
     height = int(inp.get("height", 480))
     width  = int(inp.get("width", 832))
     steps  = int(inp.get("steps", 30))
@@ -189,13 +152,11 @@ def handler(job):
     seed = int(inp.get("seed", 0))
     do_upsample = bool(inp.get("upsample", False))
 
-    # округления до VAE-сетки и 8n+1
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h, w = _round_to_vae(height, width, ratio)
     if num_frames % 8 != 1:
         num_frames = (num_frames // 8) * 8 + 1
 
-    # загружаем/создаём condition (всегда) и кладём корректную mask внутри _cond_with_mask
     conditions = _load_condition(
         init_image_url=inp.get("init_image_url"),
         init_video_url=inp.get("init_video_url"),
@@ -204,27 +165,25 @@ def handler(job):
 
     gen = torch.Generator(device=device).manual_seed(seed)
 
+    kwargs = dict(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        width=w,
+        height=h,
+        num_frames=num_frames,
+        num_inference_steps=steps,
+        generator=gen,
+    )
+    if conditions:
+        kwargs["conditions"] = conditions
+
     print(f"[GEN] num_frames requested: {num_frames}", flush=True)
     print("[GEN] generating...", flush=True)
 
     if do_upsample and pipe_up is not None:
-        out = pipe(
-            conditions=conditions,
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=w,
-            height=h,
-            num_frames=num_frames,
-            num_inference_steps=steps,
-            generator=gen,
-            output_type="latent",
-        )
+        out = pipe(**kwargs, output_type="latent")
         latents = out.frames
-
-        print("[GEN] latent upsample...", flush=True)
         latents = pipe_up(latents=latents, output_type="latent").frames
-
-        print("[GEN] decoding latents...", flush=True)
         try:
             frames = pipe.decode_latents(latents)
         except Exception:
@@ -242,29 +201,15 @@ def handler(job):
                 imgs = (imgs * 255).round().to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
                 frames = [f for f in imgs]
     else:
-        out = pipe(
-            conditions=conditions,
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            width=w,
-            height=h,
-            num_frames=num_frames,
-            num_inference_steps=steps,
-            generator=gen,
-            output_type="np",  # сразу numpy кадры
-        )
+        out = pipe(**kwargs, output_type="np")
         frames = out.frames
-        
 
     if isinstance(frames, np.ndarray):
         if frames.ndim == 5 and frames.shape[0] == 1:
-            # (1, T, H, W, C) → (T, H, W, C)
             frames = frames[0]
         if frames.ndim == 4:
-            # (T, H, W, C) → список кадров
             frames_iter = [frames[i] for i in range(frames.shape[0])]
         elif frames.ndim == 3:
-            # (T, H, W) → добавить канал
             frames_iter = [np.repeat(frames[i, :, :, None], 3, axis=2) for i in range(frames.shape[0])]
         else:
             raise ValueError(f"Unexpected frame shape: {frames.shape}")
@@ -274,10 +219,6 @@ def handler(job):
     frames_norm = [_to_hwc_uint8(fr) for fr in frames_iter]
     print("[DEBUG] first frame shape:", frames_norm[0].shape, frames_norm[0].dtype, flush=True)
 
-
-    
-
-    print("[SAVE] writing mp4 to temp & returning data:URL...", flush=True)
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
         export_to_video(frames_norm, out_path, fps=DEFAULT_FPS)
@@ -286,16 +227,14 @@ def handler(job):
 
     video_b64 = base64.b64encode(video_bytes).decode("ascii")
     data_url = f"data:video/mp4;base64,{video_b64}"
-
     print(f"[VIDEO DATA-URL] {data_url[:120]}... (len={len(data_url)})", flush=True)
-    print(f"[RESULT] frames produced: {len(frames_norm)}", flush=True)
 
     return {
         "video_data_url": data_url,
         "mime": "video/mp4",
         "width": w,
         "height": h,
-        "frames": len(frames_norm)
+        "frames": len(frames_norm),
     }
 
 # ----------------------------
