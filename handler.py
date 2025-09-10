@@ -43,11 +43,19 @@ def _save_bytes_to_tmp(ext: str, content: bytes) -> str:
 
 def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
+
+    # размерность в латентном масштабе
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h_lat, w_lat = max(1, h // ratio), max(1, w // ratio)
-    mask = torch.zeros((num_frames, h_lat, w_lat), dtype=torch.float32)
+
+    # маска в форме (T, 1, H_lat, W_lat)
+    mask = torch.zeros((num_frames, 1, h_lat, w_lat), dtype=torch.float32)
     cond.conditioning_mask = mask
     cond.mask = mask
+
+    print(f"[DEBUG] cond.mask shape: {mask.shape}", flush=True)
+    print(f"[DEBUG] cond.mask sample: {mask.flatten()[:5]}", flush=True)
+
     return [cond]
 
 def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = DEFAULT_FPS) -> str:
@@ -72,8 +80,10 @@ def _load_condition(init_image_url, init_video_url, h, w, num_frames):
         v = load_video(vpath)
         return _cond_with_mask(v, h, w, num_frames)
 
-    # если кондишна нет — возвращаем пустой список
-    return []
+    # если ничего нет — делаем blank video
+    vpath = _make_blank_video(h, w, num_frames)
+    v = load_video(vpath)
+    return _cond_with_mask(v, h, w, num_frames)
 
 def _to_hwc_uint8(frame):
     import numpy as _np
@@ -173,6 +183,7 @@ def handler(job):
         num_frames=num_frames,
         num_inference_steps=steps,
         generator=gen,
+        conditions = conditions
     )
     if conditions:
         kwargs["conditions"] = conditions
