@@ -193,8 +193,9 @@ def handler(job):
     )
 
     if media_path:
-        kwargs["conditioning_media_paths"] = [media_path]
-        kwargs["conditioning_start_frames"] = [0]
+        v = load_video(media_path)
+        kwargs["conditions"] = _cond_with_mask(v, h, w, num_frames)
+
 
     print(f"[GEN] num_frames requested: {num_frames}", flush=True)
     print("[GEN] generating...", flush=True)
