@@ -162,7 +162,7 @@ def handler(job):
     height = int(inp.get("height", 480))
     width  = int(inp.get("width", 832))
     steps  = int(inp.get("steps", 30))
-    num_frames = int(inp.get("num_frames", 97))
+    num_frames = int(inp.get("num_frames", 41))
     seed = int(inp.get("seed", 0))
     do_upsample = bool(inp.get("upsample", False))
 
@@ -171,11 +171,14 @@ def handler(job):
     if num_frames % 8 != 1:
         num_frames = (num_frames // 8) * 8 + 1
 
-    conditions = _load_condition(
-        init_image_url=inp.get("init_image_url"),
-        init_video_url=inp.get("init_video_url"),
-        h=h, w=w, num_frames=num_frames,
-    )
+    # --- conditioning (image or video)
+    media_path = None
+    if inp.get("init_image_url"):
+        resp = requests.get(inp["init_image_url"], stream=True); resp.raise_for_status()
+        media_path = _save_bytes_to_tmp(".png", resp.content)
+    elif inp.get("init_video_url"):
+        resp = requests.get(inp["init_video_url"], stream=True); resp.raise_for_status()
+        media_path = _save_bytes_to_tmp(".mp4", resp.content)
 
     gen = torch.Generator(device=device).manual_seed(seed)
 
@@ -188,45 +191,40 @@ def handler(job):
         num_inference_steps=steps,
         generator=gen,
     )
-    # ВАЖНО: передаём conditions ТОЛЬКО если они действительно есть
-    if conditions is not None:
-        kwargs["conditions"] = conditions
+
+    if media_path:
+        kwargs["conditioning_media_paths"] = [media_path]
+        kwargs["conditioning_start_frames"] = [0]
 
     print(f"[GEN] num_frames requested: {num_frames}", flush=True)
     print("[GEN] generating...", flush=True)
 
     if do_upsample and pipe_up is not None:
         out = pipe(**kwargs, output_type="latent")
-        latents = out.frames  # список тензоров или np.ndarray
+        latents = out.frames
 
         print("[GEN] latent upsample...", flush=True)
         latents = pipe_up(latents=latents, output_type="latent").frames
 
-        print("[GEN] decoding latents...", flush=True)
+        # decode latents -> numpy
         with torch.no_grad():
             if isinstance(latents, list):
-                latents = torch.stack(latents, dim=0)   # (T, C, H, W)
-            if not isinstance(latents, torch.Tensor):
-                latents = torch.from_numpy(np.asarray(latents))
-
+                latents = torch.stack(latents, dim=0)
             if latents.dim() == 4:
-                # (T, C, H, W) -> (1, C, T, H, W)  (VAE LTX ждёт CxTxHxW внутри батча)
-                latents = latents.permute(1, 0, 2, 3).unsqueeze(0)  # (1, C, T, H, W)
-
+                latents = latents.unsqueeze(0)  # (1, C, T, H, W)
             vae_dtype = next(pipe.vae.parameters()).dtype
             latents = latents.to(device=device, dtype=vae_dtype)
             scal = getattr(pipe.vae.config, "scaling_factor", 0.18215)
-
-            imgs = pipe.vae.decode(latents / scal).sample  # (1, C, T, H, W)
+            imgs = pipe.vae.decode(latents / scal).sample
             imgs = (imgs.clamp(-1, 1) + 1) / 2
-            imgs = (imgs * 255).round().to(torch.uint8)          # (1,C,T,H,W)
-            imgs = imgs.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()  # (T,H,W,C)
+            imgs = (imgs * 255).round().to(torch.uint8)
+            imgs = imgs.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()
             frames = [f for f in imgs]
     else:
         out = pipe(**kwargs, output_type="np")
         frames = out.frames
 
-    # --- нормализация к списку HxWxC uint8
+    # --- convert to list of HWC uint8
     if isinstance(frames, np.ndarray):
         if frames.ndim == 5 and frames.shape[0] == 1:
             frames = frames[0]
@@ -239,13 +237,9 @@ def handler(job):
     else:
         frames_iter = frames
 
-    if not frames_iter:
-        raise ValueError("Pipeline returned 0 frames.")
-
     frames_norm = [_to_hwc_uint8(fr) for fr in frames_iter]
     print("[DEBUG] first frame shape:", frames_norm[0].shape, frames_norm[0].dtype, flush=True)
 
-    # --- сохраняем в mp4 и возвращаем data:URL (без внешних бакетов)
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
         export_to_video(frames_norm, out_path, fps=DEFAULT_FPS)
@@ -255,7 +249,6 @@ def handler(job):
     video_b64 = base64.b64encode(video_bytes).decode("ascii")
     data_url = f"data:video/mp4;base64,{video_b64}"
     print(f"[VIDEO DATA-URL] {data_url[:120]}... (len={len(data_url)})", flush=True)
-    print(f"[RESULT] frames produced: {len(frames_norm)}", flush=True)
 
     return {
         "video_data_url": data_url,
@@ -264,6 +257,7 @@ def handler(job):
         "height": h,
         "frames": len(frames_norm),
     }
+
 
 # ----------------------------
 # Safe wrapper
