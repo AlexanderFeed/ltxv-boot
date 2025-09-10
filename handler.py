@@ -183,27 +183,32 @@ def handler(job):
     if do_upsample and pipe_up is not None:
         out = pipe(**kwargs, output_type="latent")
         latents = out.frames
+
+        print("[GEN] latent upsample...", flush=True)
         latents = pipe_up(latents=latents, output_type="latent").frames
-        try:
-            frames = pipe.decode_latents(latents)
-        except Exception:
-            with torch.no_grad():
-                t = latents
-                if isinstance(t, list):
-                    t = torch.stack(t, dim=0)
-                t = t.to(device=device, dtype=torch.float32)
-                if t.dim() == 5:
-                    b, tt, c, hh, ww = t.shape
-                    t = t.reshape(b * tt, c, hh, ww)
-                scal = getattr(getattr(pipe, "vae", object), "config", object).__dict__.get("scaling_factor", 0.18215)
-                imgs = pipe.vae.decode(t / scal).sample
-                imgs = (imgs.clamp(-1, 1) + 1) / 2
-                imgs = (imgs * 255).round().to(torch.uint8).permute(0, 2, 3, 1).cpu().numpy()
-                frames = [f for f in imgs]
+
+        print("[GEN] decoding latents...", flush=True)
+        with torch.no_grad():
+            if isinstance(latents, list):
+                latents = torch.stack(latents, dim=0)  # (T, C, H, W)
+            if not isinstance(latents, torch.Tensor):
+                latents = torch.from_numpy(np.asarray(latents))
+            if latents.dim() == 4:
+                latents = latents.unsqueeze(0)        # (1, C, T, H, W)
+
+            latents = latents.to(device=device, dtype=torch.float32)
+            scal = getattr(pipe.vae.config, "scaling_factor", 0.18215)
+
+            imgs = pipe.vae.decode(latents / scal).sample  # (1, C, T, H, W)
+            imgs = (imgs.clamp(-1, 1) + 1) / 2
+            imgs = (imgs * 255).round().to(torch.uint8)
+            imgs = imgs.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
+            frames = [f for f in imgs]
     else:
         out = pipe(**kwargs, output_type="np")
         frames = out.frames
 
+    # --- нормализация и проверки
     if isinstance(frames, np.ndarray):
         if frames.ndim == 5 and frames.shape[0] == 1:
             frames = frames[0]
@@ -215,6 +220,9 @@ def handler(job):
             raise ValueError(f"Unexpected frame shape: {frames.shape}")
     else:
         frames_iter = frames
+
+    if not frames_iter:
+        raise ValueError("Pipeline returned 0 frames.")
 
     frames_norm = [_to_hwc_uint8(fr) for fr in frames_iter]
     print("[DEBUG] first frame shape:", frames_norm[0].shape, frames_norm[0].dtype, flush=True)
