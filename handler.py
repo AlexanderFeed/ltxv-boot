@@ -40,34 +40,22 @@ def _save_bytes_to_tmp(ext: str, content: bytes) -> str:
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(content)
         return tmp.name
-    
-def _make_blank_video(h: int, w: int, num_frames: int, fps: int = DEFAULT_FPS) -> str:
-    """
-    Создаёт пустое чёрное видео (num_frames кадров) для fallback.
-    """
-    frame = np.zeros((h, w, 3), dtype=np.uint8)
-    frames = [frame] * num_frames
-    with tempfile.TemporaryDirectory() as td:
-        out_path = os.path.join(td, "blank.mp4")
-        export_to_video(frames, out_path, fps=fps)
-        with open(out_path, "rb") as f:
-            return _save_bytes_to_tmp(".mp4", f.read())
-
 
 def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
+    """
+    Создаёт LTXVideoCondition и проставляет маску в латентном масштабе.
+    ВАЖНО: эту функцию вызываем только если действительно есть conditioning.
+    """
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
 
     # размерность в латентном масштабе
     ratio = getattr(pipe, "vae_spatial_compression_ratio", 32)
     h_lat, w_lat = max(1, h // ratio), max(1, w // ratio)
 
-    # маска в форме (T, 1, H_lat, W_lat)
+    # mask формы (T, 1, H_lat, W_lat). 0 — «не шумить» (сильнее учитывать conditioning)
     mask = torch.zeros((num_frames, 1, h_lat, w_lat), dtype=torch.float32)
     cond.conditioning_mask = mask
     cond.mask = mask
-
-    print(f"[DEBUG] cond.mask shape: {mask.shape}", flush=True)
-    print(f"[DEBUG] cond.mask sample: {mask.flatten()[:5]}", flush=True)
 
     return [cond]
 
@@ -80,6 +68,9 @@ def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = DEFAULT
             return _save_bytes_to_tmp(".mp4", f.read())
 
 def _load_condition(init_image_url, init_video_url, h, w, num_frames):
+    """
+    Возвращает список conditions или None (если conditioning нет).
+    """
     if init_video_url:
         resp = requests.get(init_video_url, stream=True); resp.raise_for_status()
         vpath = _save_bytes_to_tmp(".mp4", resp.content)
@@ -93,10 +84,8 @@ def _load_condition(init_image_url, init_video_url, h, w, num_frames):
         v = load_video(vpath)
         return _cond_with_mask(v, h, w, num_frames)
 
-    # если ничего нет — делаем blank video
-    vpath = _make_blank_video(h, w, num_frames)
-    v = load_video(vpath)
-    return _cond_with_mask(v, h, w, num_frames)
+    # conditioning отсутствует — возвращаем None и НЕ передаём conditions в пайплайн
+    return None
 
 def _to_hwc_uint8(frame):
     import numpy as _np
@@ -112,17 +101,19 @@ def _to_hwc_uint8(frame):
 
     if f.ndim == 2:
         f = f[:, :, None]
-    elif f.ndim == 3:
-        if f.shape[0] in (1, 3, 4):
-            f = _np.transpose(f, (1, 2, 0))
+    elif f.ndim == 3 and f.shape[0] in (1, 3, 4):
+        # (C,H,W) -> (H,W,C)
+        f = _np.transpose(f, (1, 2, 0))
+
     if _np.issubdtype(f.dtype, _np.floating):
         f = (_np.clip(f, -1, 1) + 1.0) * 127.5
-        f = np.round(f).astype(np.uint8)
+        f = _np.round(f).astype(_np.uint8)
     elif f.dtype != _np.uint8:
-        f = _np.clip(f, 0, 255).astype(np.uint8)
-    if f.shape[2] == 1:
+        f = _np.clip(f, 0, 255).astype(_np.uint8)
+
+    if f.ndim == 3 and f.shape[2] == 1:
         f = _np.repeat(f, 3, axis=2)
-    if f.shape[2] > 4:
+    if f.ndim == 3 and f.shape[2] > 4:
         f = f[:, :, :3]
     return f
 
@@ -196,9 +187,9 @@ def handler(job):
         num_frames=num_frames,
         num_inference_steps=steps,
         generator=gen,
-        conditions = conditions
     )
-    if conditions:
+    # ВАЖНО: передаём conditions ТОЛЬКО если они действительно есть
+    if conditions is not None:
         kwargs["conditions"] = conditions
 
     print(f"[GEN] num_frames requested: {num_frames}", flush=True)
@@ -206,7 +197,7 @@ def handler(job):
 
     if do_upsample and pipe_up is not None:
         out = pipe(**kwargs, output_type="latent")
-        latents = out.frames
+        latents = out.frames  # список тензоров или np.ndarray
 
         print("[GEN] latent upsample...", flush=True)
         latents = pipe_up(latents=latents, output_type="latent").frames
@@ -214,26 +205,28 @@ def handler(job):
         print("[GEN] decoding latents...", flush=True)
         with torch.no_grad():
             if isinstance(latents, list):
-                latents = torch.stack(latents, dim=0)  # (T, C, H, W)
+                latents = torch.stack(latents, dim=0)   # (T, C, H, W)
             if not isinstance(latents, torch.Tensor):
                 latents = torch.from_numpy(np.asarray(latents))
+
             if latents.dim() == 4:
-                latents = latents.unsqueeze(0)        # (1, C, T, H, W)
+                # (T, C, H, W) -> (1, C, T, H, W)  (VAE LTX ждёт CxTxHxW внутри батча)
+                latents = latents.permute(1, 0, 2, 3).unsqueeze(0)  # (1, C, T, H, W)
 
             vae_dtype = next(pipe.vae.parameters()).dtype
             latents = latents.to(device=device, dtype=vae_dtype)
             scal = getattr(pipe.vae.config, "scaling_factor", 0.18215)
-            imgs = pipe.vae.decode(latents / scal).sample
 
+            imgs = pipe.vae.decode(latents / scal).sample  # (1, C, T, H, W)
             imgs = (imgs.clamp(-1, 1) + 1) / 2
-            imgs = (imgs * 255).round().to(torch.uint8)
-            imgs = imgs.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
+            imgs = (imgs * 255).round().to(torch.uint8)          # (1,C,T,H,W)
+            imgs = imgs.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()  # (T,H,W,C)
             frames = [f for f in imgs]
     else:
         out = pipe(**kwargs, output_type="np")
         frames = out.frames
 
-    # --- нормализация и проверки
+    # --- нормализация к списку HxWxC uint8
     if isinstance(frames, np.ndarray):
         if frames.ndim == 5 and frames.shape[0] == 1:
             frames = frames[0]
@@ -252,6 +245,7 @@ def handler(job):
     frames_norm = [_to_hwc_uint8(fr) for fr in frames_iter]
     print("[DEBUG] first frame shape:", frames_norm[0].shape, frames_norm[0].dtype, flush=True)
 
+    # --- сохраняем в mp4 и возвращаем data:URL (без внешних бакетов)
     with tempfile.TemporaryDirectory() as td:
         out_path = os.path.join(td, f"{job['id']}.mp4")
         export_to_video(frames_norm, out_path, fps=DEFAULT_FPS)
@@ -261,6 +255,7 @@ def handler(job):
     video_b64 = base64.b64encode(video_bytes).decode("ascii")
     data_url = f"data:video/mp4;base64,{video_b64}"
     print(f"[VIDEO DATA-URL] {data_url[:120]}... (len={len(data_url)})", flush=True)
+    print(f"[RESULT] frames produced: {len(frames_norm)}", flush=True)
 
     return {
         "video_data_url": data_url,
