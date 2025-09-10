@@ -40,6 +40,19 @@ def _save_bytes_to_tmp(ext: str, content: bytes) -> str:
     with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
         tmp.write(content)
         return tmp.name
+    
+def _make_blank_video(h: int, w: int, num_frames: int, fps: int = DEFAULT_FPS) -> str:
+    """
+    Создаёт пустое чёрное видео (num_frames кадров) для fallback.
+    """
+    frame = np.zeros((h, w, 3), dtype=np.uint8)
+    frames = [frame] * num_frames
+    with tempfile.TemporaryDirectory() as td:
+        out_path = os.path.join(td, "blank.mp4")
+        export_to_video(frames, out_path, fps=fps)
+        with open(out_path, "rb") as f:
+            return _save_bytes_to_tmp(".mp4", f.read())
+
 
 def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
