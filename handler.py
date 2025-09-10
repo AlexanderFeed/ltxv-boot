@@ -196,10 +196,11 @@ def handler(job):
             if latents.dim() == 4:
                 latents = latents.unsqueeze(0)        # (1, C, T, H, W)
 
-            latents = latents.to(device=device, dtype=torch.float32)
+            vae_dtype = next(pipe.vae.parameters()).dtype
+            latents = latents.to(device=device, dtype=vae_dtype)
             scal = getattr(pipe.vae.config, "scaling_factor", 0.18215)
+            imgs = pipe.vae.decode(latents / scal).sample
 
-            imgs = pipe.vae.decode(latents / scal).sample  # (1, C, T, H, W)
             imgs = (imgs.clamp(-1, 1) + 1) / 2
             imgs = (imgs * 255).round().to(torch.uint8)
             imgs = imgs.squeeze(0).permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
