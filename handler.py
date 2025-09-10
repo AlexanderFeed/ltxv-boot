@@ -82,17 +82,7 @@ def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = DEFAULT
         with open(out_path, "rb") as f:
             return _save_bytes_to_tmp(".mp4", f.read())
 
-def _load_condition(init_image_url: str | None,
-                    init_video_url: str | None,
-                    h: int,
-                    w: int,
-                    num_frames: int):
-    """
-    Всегда возвращает валидный condition с маской:
-    - video: как есть
-    - image: разворачиваем в видео длины num_frames
-    - none: чёрное видео длины num_frames
-    """
+def _load_condition(init_image_url, init_video_url, h, w, num_frames):
     if init_video_url:
         resp = requests.get(init_video_url, stream=True); resp.raise_for_status()
         vpath = _save_bytes_to_tmp(".mp4", resp.content)
@@ -106,10 +96,9 @@ def _load_condition(init_image_url: str | None,
         v = load_video(vpath)
         return _cond_with_mask(v, h, w, num_frames)
 
-    # нет исходников — даём пустое видео нужной длины
-    vpath = _make_blank_video(h, w, num_frames)
-    v = load_video(vpath)
-    return _cond_with_mask(v, h, w, num_frames)
+    # <<< ВАЖНО: если кондишна нет — ничего не подсовываем >>>
+    return []
+
 
 def _to_hwc_uint8(frame):
     import numpy as _np
