@@ -10,20 +10,31 @@ RUN apt-get update && apt-get install -y \
 ENV PYTHONUNBUFFERED=1 \
     HUGGINGFACE_HUB_CACHE=/runpod-volume/hf-cache
 
-# Обновим pip ИМЕННО для того python3, что будем запускать
+# Обновим pip именно для того python3, что будем запускать
 RUN python3 -m pip install --upgrade pip
 
 # Скопируем зависимости
 COPY requirements.txt /workspace/requirements.txt
 
-# Установим зависимости тем же интерпретатором (+ PyTorch index) и проверим requests
+# Установим зависимости (+ PyTorch index)
 RUN python3 -m pip install --no-cache-dir -r /workspace/requirements.txt \
       --extra-index-url https://download.pytorch.org/whl/cu121 \
- && python3 -c "import sys, requests; print('[CHECK]', sys.executable); print('[CHECK] requests', requests.__version__)"
-
-RUN python3 -m pip install runpod requests
+ && python3 -m pip install runpod requests
 
 # Рабочая папка
+WORKDIR /workspace
+
+# --- Клонируем LTX-Video
+RUN git clone --depth 1 https://github.com/Lightricks/LTX-Video.git /workspace/LTX-Video
+
+# --- Копируем overlay поверх
+COPY overlay/ /workspace/LTX-Video/
+
+# --- Устанавливаем LTX-Video (editable mode)
+WORKDIR /workspace/LTX-Video
+RUN python3 -m pip install -e '.[inference-script]'
+
+# Вернёмся в /workspace для handler
 WORKDIR /workspace
 
 # Скопируем handler
@@ -31,7 +42,3 @@ COPY handler.py /workspace/handler.py
 
 # Запуск serverless-воркера
 CMD ["python3", "handler.py"]
-
-
-
-

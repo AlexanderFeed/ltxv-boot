@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LTX-Video Generator - Advanced</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 { 
+            margin-top: 30px; 
+            text-align: center; 
+            color: #333;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], input[type="number"], select, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        input[type="file"] {
+            font-size: 16px;
+            padding: 8px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #eee;
+            flex-wrap: wrap;
+        }
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 16px;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+            white-space: nowrap;
+        }
+        .tab.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+            font-weight: bold;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .param-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 40px;
+            margin-bottom: 20px;
+        }
+        .param-group {
+            background: #f8f9fa;
+            padding: 30px;
+            border-radius: 12px;
+            border-left: 4px solid #007bff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            min-height: 300px;
+            display: flex;
+            flex-direction: column;
+        }
+        .param-group h3 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: #333;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .param-description {
+            font-size: 13px;
+            color: #666;
+            margin-top: 12px;
+            font-style: italic;
+            line-height: 1.5;
+            flex-grow: 1;
+        }
+        .param-group label {
+            margin-top: 20px;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        .param-group input,
+        .param-group select,
+        .param-group textarea {
+            margin-bottom: 12px;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .param-group textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+        
+        /* Улучшения для мобильных устройств */
+        @media (max-width: 1400px) {
+            .param-grid {
+                grid-template-columns: repeat(3, 1fr);
+                gap: 30px;
+            }
+        }
+        
+        @media (max-width: 1000px) {
+            .param-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 25px;
+            }
+        }
+        
+        @media (max-width: 768px) {
+            .param-grid {
+                grid-template-columns: 1fr;
+                gap: 20px;
+            }
+            .param-group {
+                min-height: auto;
+                padding: 25px;
+            }
+            .preset-buttons {
+                flex-direction: column;
+                align-items: center;
+            }
+            .preset-btn {
+                width: 200px;
+            }
+            .tabs {
+                flex-direction: column;
+            }
+            .tab {
+                text-align: center;
+                border-bottom: none;
+                border-right: 3px solid transparent;
+            }
+            .tab.active {
+                border-right-color: #007bff;
+                border-bottom-color: transparent;
+            }
+        }
+        #generateBtn {
+            font-size: 18px;
+            padding: 15px 40px;
+            cursor: pointer;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            transition: background-color 0.3s;
+            width: 100%;
+            margin-top: 20px;
+        }
+        #generateBtn:hover {
+            background-color: #0056b3;
+        }
+        #generateBtn:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        #loader {
+            margin: 30px 0;
+            display: none;
+            text-align: center;
+        }
+        #status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+        .status-pending {
+            background-color: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+        .status-success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .status-failure {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        #result {
+            margin-top: 40px;
+            text-align: center;
+        }
+        #videoPreview {
+            margin-top: 16px;
+            max-width: 720px;
+            width: 100%;
+            display: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #f0f0f0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 10px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #007bff;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .preset-buttons {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .preset-btn {
+            padding: 12px 20px;
+            border: 2px solid #007bff;
+            background: white;
+            color: #007bff;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+            min-width: 140px;
+            text-align: center;
+        }
+        .preset-btn:hover {
+            background: #007bff;
+            color: white;
+            transform: translateY(-2px);
+        }
+        .preset-btn.active {
+            background: #007bff;
+            color: white;
+            box-shadow: 0 4px 12px rgba(0,123,255,0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎬 LTX-Video Generator - Advanced</h1>
+        
+        <div class="preset-buttons">
+            <button class="preset-btn active" onclick="loadPreset('fast')">⚡ Быстрая генерация</button>
+            <button class="preset-btn" onclick="loadPreset('quality')">🎨 Высокое качество</button>
+            <button class="preset-btn" onclick="loadPreset('creative')">🎭 Креативная</button>
+            <button class="preset-btn" onclick="loadPreset('stable')">🔒 Стабильная</button>
+        </div>
+        
+        <div class="preset-buttons" style="margin-bottom: 20px;">
+            <button class="preset-btn" onclick="loadFormatPreset('shorts')">📱 Shorts (9:16)</button>
+            <button class="preset-btn" onclick="loadFormatPreset('youtube')">🖥️ YouTube (16:9)</button>
+            <button class="preset-btn" onclick="loadFormatPreset('instagram')">📐 Instagram (1:1)</button>
+            <button class="preset-btn" onclick="loadFormatPreset('cinema')">🎬 Кино (2:1)</button>
+        </div>
+
+        <form id="genForm">
+            <div class="tabs">
+                <button type="button" class="tab active" onclick="showTab('basic')">Основные</button>
+                <button type="button" class="tab" onclick="showTab('generation')">Генерация</button>
+                <button type="button" class="tab" onclick="showTab('models')">Модели</button>
+                <button type="button" class="tab" onclick="showTab('advanced')">Продвинутые</button>
+            </div>
+
+            <!-- Основные параметры -->
+            <div id="basic" class="tab-content active">
+                <div class="param-grid">
+                    <div class="param-group">
+                        <h3>📝 Промпт</h3>
+                        <label for="prompt">Описание видео:</label>
+                        <textarea id="prompt" name="prompt" rows="4" placeholder="Введите описание видео, например: a cat walking in the garden" required></textarea>
+                        <div class="param-description">Детальное описание того, что должно быть в видео. Чем подробнее описание, тем лучше результат.</div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>🚫 Негативный промпт</h3>
+                        <label for="negative_prompt">Что исключить:</label>
+                        <textarea id="negative_prompt" name="negative_prompt" rows="4">worst quality, inconsistent motion, blurry, jittery, distorted</textarea>
+                        <div class="param-description">Что НЕ должно появляться в видео. Помогает избежать нежелательных артефактов и дефектов.</div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>🖼️ Начальное изображение</h3>
+                        <label for="image">Изображение (необязательно):</label>
+                        <input id="image" type="file" name="image" accept="image/*">
+                        <div class="param-description">Для image-to-video генерации. Загрузите изображение, которое будет использоваться как основа для видео.</div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>📏 Размеры</h3>
+                        <label for="expected_width">Ширина:</label>
+                        <select id="expected_width" name="expected_width">
+                            <option value="512">512px</option>
+                            <option value="576">576px</option>
+                            <option value="640">640px</option>
+                            <option value="704">704px</option>
+                            <option value="720">720px</option>
+                            <option value="768">768px</option>
+                            <option value="864">864px</option>
+                            <option value="1024">1024px</option>
+                            <option value="1152">1152px</option>
+                            <option value="1280" selected>1280px</option>
+                            <option value="1344">1344px</option>
+                            <option value="1536">1536px</option>
+                            <option value="1728">1728px</option>
+                            <option value="1920">1920px</option>
+                            <option value="2048">2048px</option>
+                        </select>
+                        
+                        <label for="expected_height">Высота:</label>
+                        <select id="expected_height" name="expected_height">
+                            <option value="512">512px</option>
+                            <option value="576">576px</option>
+                            <option value="640">640px</option>
+                            <option value="720" selected>720px</option>
+                            <option value="768">768px</option>
+                            <option value="864">864px</option>
+                            <option value="1024">1024px</option>
+                            <option value="1080">1080px</option>
+                            <option value="1152">1152px</option>
+                            <option value="1280">1280px</option>
+                            <option value="1344">1344px</option>
+                            <option value="1536">1536px</option>
+                        </select>
+                        <div class="param-description">Разрешение выходного видео. Больше разрешение = лучше качество, но дольше генерация. Популярные форматы: 9:16 (Shorts), 16:9 (YouTube), 1:1 (Instagram).</div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>🎞️ Временные параметры</h3>
+                        <label for="num_frames">Количество кадров:</label>
+                        <select id="num_frames" name="num_frames">
+                            <optgroup label="⚡ Короткие (быстро)">
+                                <option value="48">48 кадров (2 сек)</option>
+                                <option value="72">72 кадра (3 сек)</option>
+                                <option value="96" selected>96 кадров (4 сек)</option>
+                                <option value="120">120 кадров (5 сек)</option>
+                                <option value="144">144 кадра (6 сек)</option>
+                                <option value="192">192 кадра (8 сек)</option>
+                                <option value="240">240 кадров (10 сек)</option>
+                            </optgroup>
+                            <optgroup label="📹 Средние">
+                                <option value="360">360 кадров (15 сек)</option>
+                                <option value="480">480 кадров (20 сек)</option>
+                                <option value="600">600 кадров (25 сек)</option>
+                                <option value="720">720 кадров (30 сек)</option>
+                            </optgroup>
+                            <optgroup label="🎬 Длинные (медленно)">
+                                <option value="900">900 кадров (37.5 сек)</option>
+                                <option value="1080">1080 кадров (45 сек)</option>
+                                <option value="1200">1200 кадров (50 сек)</option>
+                                <option value="1440">1440 кадров (60 сек)</option>
+                            </optgroup>
+                        </select>
+                        
+                        <label for="seed">Seed:</label>
+                        <input id="seed" type="number" name="seed" value="42">
+                        <div class="param-description">Для воспроизводимости результатов. Одинаковый seed + одинаковые параметры = одинаковый результат.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Параметры генерации -->
+            <div id="generation" class="tab-content">
+                <div class="param-grid">
+                    <div class="param-group">
+                        <h3>⚙️ Основные параметры генерации</h3>
+                        <label for="num_inference_steps">Шаги инференса:</label>
+                        <input id="num_inference_steps" type="number" name="num_inference_steps" value="50" min="10" max="200">
+                        <div class="param-description">Количество шагов процесса создания видео. Больше = лучше качество, но медленнее. 25-50 для быстрой генерации, 75-100 для высокого качества.</div>
+                        
+                        <label for="denoise_strength">Сила денойза:</label>
+                        <input id="denoise_strength" type="number" name="denoise_strength" value="0.4" min="0.1" max="0.9" step="0.1">
+                        <div class="param-description">Контролирует силу изменения изображения. 0.1-0.3 = минимальные изменения, 0.3-0.5 = умеренные, 0.5+ = сильные изменения.</div>
+                        
+                        <label for="decode_timestep">Таймстеп декодирования:</label>
+                        <input id="decode_timestep" type="number" name="decode_timestep" value="0.05" min="0.01" max="0.2" step="0.01">
+                        <div class="param-description">Время декодирования из латентного пространства. 0.01-0.05 = абстрактные результаты, 0.05-0.1 = стандартные, 0.1+ = детализированные.</div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>🎨 Image-to-Video параметры</h3>
+                        <label for="image_cond_noise_scale">Шум для изображения:</label>
+                        <input id="image_cond_noise_scale" type="number" name="image_cond_noise_scale" value="0.025" min="0.01" max="0.1" step="0.005">
+                        <div class="param-description">Контролирует шум для image-to-video генерации. 0.01-0.03 = близко к исходному изображению, 0.03-0.06 = баланс, 0.06+ = больше изменений.</div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>📐 Масштабирование</h3>
+                        <label for="downscale_factor">Фактор уменьшения:</label>
+                        <input id="downscale_factor" type="number" name="downscale_factor" value="0.8" min="0.5" max="0.9" step="0.01">
+                        <div class="param-description">Фактор уменьшения для первой генерации. 0.5-0.6 = быстро, но менее детально, 0.6-0.7 = стандартно, 0.7+ = качественнее, но медленнее.</div>
+                        
+                        <label for="upscale_factor">Фактор увеличения:</label>
+                        <input id="upscale_factor" type="number" name="upscale_factor" value="1.25" min="1.0" max="2.0" step="0.05">
+                        <div class="param-description">Фактор увеличения для финального результата. 1.5-2.0 = умеренное увеличение, 2.0-2.5 = стандартное, 2.5+ = сильное увеличение.</div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>🔧 Финальный денойз</h3>
+                        <label for="final_num_inference_steps">Финальные шаги:</label>
+                        <input id="final_num_inference_steps" type="number" name="final_num_inference_steps" value="20" min="5" max="50">
+                        <div class="param-description">Количество шагов финального денойза. 5-10 = быстро, 10-20 = стандартно, 20+ = высокое качество, но медленнее.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Параметры моделей -->
+            <div id="models" class="tab-content">
+                <div class="param-grid">
+                    <div class="param-group">
+                        <h3>🔍 VAE параметры</h3>
+                        <label for="vae_spatial_compression_ratio">Пространственное сжатие:</label>
+                        <input id="vae_spatial_compression_ratio" type="number" name="vae_spatial_compression_ratio" value="32" min="16" max="64">
+                        <div class="param-description">Коэффициент пространственного сжатия VAE (автоэнкодера). 16-24 = больше деталей, больше памяти, 32 = стандартно, 48+ = меньше деталей, меньше памяти.</div>
+                        
+                        <label for="vae_temporal_compression_ratio">Временное сжатие:</label>
+                        <input id="vae_temporal_compression_ratio" type="number" name="vae_temporal_compression_ratio" value="8" min="4" max="16">
+                        <div class="param-description">Коэффициент временного сжатия VAE. 4-6 = больше кадров в памяти, 8 = стандартно, 12+ = меньше кадров в памяти.</div>
+                    </div>
+
+                    <div class="param-group">
+                        <h3>🧠 Transformer параметры</h3>
+                        <label for="transformer_num_attention_heads">Attention heads:</label>
+                        <input id="transformer_num_attention_heads" type="number" name="transformer_num_attention_heads" value="32" min="8" max="64">
+                        <div class="param-description">Количество attention heads в трансформере. 8-16 = быстрее, но менее детально, 32 = стандартно, 48+ = медленнее, но более детально.</div>
+                        
+                        <label for="transformer_num_layers">Количество слоев:</label>
+                        <input id="transformer_num_layers" type="number" name="transformer_num_layers" value="48" min="12" max="96">
+                        <div class="param-description">Количество слоев трансформера. 12-24 = быстрее, но проще паттерны, 48 = стандартно, 72+ = медленнее, но сложнее паттерны.</div>
+                        
+                        <label for="transformer_attention_head_dim">Размерность attention:</label>
+                        <input id="transformer_attention_head_dim" type="number" name="transformer_attention_head_dim" value="128" min="64" max="256">
+                        <div class="param-description">Размерность каждого attention head. 64-96 = быстрее, но менее выразительно, 128 = стандартно, 192+ = медленнее, но более выразительно.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Продвинутые параметры -->
+            <div id="advanced" class="tab-content">
+                <div class="param-grid">
+                    <div class="param-group">
+                        <h3>⏱️ Scheduler параметры</h3>
+                        <label for="scheduler_num_train_timesteps">Шаги обучения:</label>
+                        <input id="scheduler_num_train_timesteps" type="number" name="scheduler_num_train_timesteps" value="1000" min="500" max="2000">
+                        <div class="param-description">Количество шагов обучения scheduler (планировщика). 500-750 = быстрее, но менее точно, 1000 = стандартно, 1500+ = медленнее, но точнее.</div>
+                        
+                        <label for="scheduler_stochastic_sampling">Стохастическая выборка:</label>
+                        <select id="scheduler_stochastic_sampling" name="scheduler_stochastic_sampling">
+                            <option value="false" selected>Выключено</option>
+                            <option value="true">Включено</option>
+                        </select>
+                        <div class="param-description">Использовать стохастическую выборку. Выключено = воспроизводимые результаты, Включено = более разнообразные результаты.</div>
+                        
+                        <label for="scheduler_use_karras_sigmas">Karras sigmas:</label>
+                        <select id="scheduler_use_karras_sigmas" name="scheduler_use_karras_sigmas">
+                            <option value="false" selected>Выключено</option>
+                            <option value="true">Включено</option>
+                        </select>
+                        <div class="param-description">Использовать Karras sigmas для денойзинга. Может улучшить качество генерации, но требует больше ресурсов.</div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="generateBtn" type="submit">🎬 Сгенерировать видео</button>
+        </form>
+
+        <div id="loader">
+            <svg width="80" height="80" viewBox="0 0 44 44" stroke="#007bff">
+                <g fill="none" fill-rule="evenodd" stroke-width="3">
+                    <circle cx="22" cy="22" r="19.5" stroke-opacity="0.3"/>
+                    <path d="M42 22c0-11.046-8.954-20-20-20">
+                        <animateTransform attributeName="transform"
+                            type="rotate"
+                            from="0 22 22"
+                            to="360 22 22"
+                            dur="1s"
+                            repeatCount="indefinite"/>
+                    </path>
+                </g>
+            </svg>
+            <p style="margin-top: 10px;">⏳ Идёт генерация видео. Подождите...</p>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+
+        <div id="status"></div>
+        
+        <div id="result">
+            <video id="videoPreview" controls></video>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:8000';
+
+        const form = document.getElementById('genForm');
+        const loader = document.getElementById('loader');
+        const videoPreview = document.getElementById('videoPreview');
+        const statusDiv = document.getElementById('status');
+        const progressFill = document.getElementById('progressFill');
+        let pollingInterval;
+
+        // Пресеты параметров
+        const presets = {
+            fast: {
+                num_inference_steps: 25,
+                denoise_strength: 0.3,
+                decode_timestep: 0.05,
+                final_num_inference_steps: 5,
+                downscale_factor: 0.7,
+                upscale_factor: 1.8
+            },
+            quality: {
+                num_inference_steps: 75,
+                denoise_strength: 0.25,
+                decode_timestep: 0.03,
+                final_num_inference_steps: 15,
+                downscale_factor: 0.65,
+                upscale_factor: 2.2
+            },
+            creative: {
+                num_inference_steps: 60,
+                denoise_strength: 0.4,
+                decode_timestep: 0.07,
+                final_num_inference_steps: 12,
+                downscale_factor: 0.6,
+                upscale_factor: 2.5,
+                image_cond_noise_scale: 0.04
+            },
+            stable: {
+                num_inference_steps: 40,
+                denoise_strength: 0.2,
+                decode_timestep: 0.04,
+                final_num_inference_steps: 8,
+                downscale_factor: 0.75,
+                upscale_factor: 1.6,
+                image_cond_noise_scale: 0.02
+            }
+        };
+
+        function loadPreset(presetName) {
+            const preset = presets[presetName];
+            if (!preset) return;
+
+            // Обновляем активную кнопку (только в первой группе)
+            document.querySelectorAll('.preset-buttons:first-child .preset-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            // Применяем параметры
+            Object.keys(preset).forEach(key => {
+                const element = document.getElementById(key);
+                if (element) {
+                    element.value = preset[key];
+                }
+            });
+        }
+
+        function loadFormatPreset(format) {
+            const widthSelect = document.getElementById('expected_width');
+            const heightSelect = document.getElementById('expected_height');
+            const framesSelect = document.getElementById('num_frames');
+            
+            // Обновляем активную кнопку (только во второй группе)
+            document.querySelectorAll('.preset-buttons:nth-child(2) .preset-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            switch(format) {
+                case 'shorts':
+                    widthSelect.value = '720';
+                    heightSelect.value = '1280';
+                    framesSelect.value = '96'; // 4 секунды
+                    break;
+                case 'youtube':
+                    widthSelect.value = '1920';
+                    heightSelect.value = '1080';
+                    framesSelect.value = '240'; // 10 секунд
+                    break;
+                case 'instagram':
+                    widthSelect.value = '1024';
+                    heightSelect.value = '1024';
+                    framesSelect.value = '144'; // 6 секунд
+                    break;
+                case 'cinema':
+                    widthSelect.value = '2048';
+                    heightSelect.value = '1152';
+                    framesSelect.value = '480'; // 20 секунд
+                    break;
+            }
+        }
+
+        function showTab(tabName) {
+            // Скрываем все табы
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Показываем нужный таб
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        function showStatus(message, type) {
+            statusDiv.textContent = message;
+            statusDiv.className = `status-${type}`;
+            statusDiv.style.display = 'block';
+        }
+
+        function updateProgress(progress) {
+            progressFill.style.width = `${progress}%`;
+        }
+
+        async function pollTaskStatus(taskId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/status/${taskId}`);
+                const data = await response.json();
+                
+                if (data.status === 'PENDING') {
+                    showStatus('🔄 Задача в очереди...', 'pending');
+                    updateProgress(10);
+                } else if (data.status === 'STARTED') {
+                    showStatus('⚙️ Обработка началась...', 'pending');
+                    updateProgress(30);
+                } else if (data.status === 'SUCCESS') {
+                    showStatus('✅ Видео готово!', 'success');
+                    updateProgress(100);
+                    
+                    // Загружаем видео
+                    const videoResponse = await fetch(`${API_BASE_URL}/video/${data.result}`);
+                    if (videoResponse.ok) {
+                        const blob = await videoResponse.blob();
+                        const videoUrl = URL.createObjectURL(blob);
+                        videoPreview.src = videoUrl;
+                        videoPreview.style.display = "block";
+                    }
+                    
+                    clearInterval(pollingInterval);
+                    loader.style.display = "none";
+                    document.getElementById('generateBtn').disabled = false;
+                    document.getElementById('image').value = '';
+                } else if (data.status === 'FAILURE') {
+                    showStatus('❌ Ошибка генерации: ' + (data.result || 'Неизвестная ошибка'), 'failure');
+                    clearInterval(pollingInterval);
+                    loader.style.display = "none";
+                    document.getElementById('generateBtn').disabled = false;
+                    document.getElementById('image').value = '';
+                }
+            } catch (error) {
+                console.error('Ошибка при проверке статуса:', error);
+            }
+        }
+
+        form.onsubmit = async (e) => {
+            e.preventDefault();
+            
+            const generateBtn = document.getElementById('generateBtn');
+            generateBtn.disabled = true;
+            loader.style.display = "block";
+            videoPreview.style.display = "none";
+            statusDiv.style.display = "none";
+            updateProgress(0);
+            
+            const formData = new FormData(form);
+            
+            // Добавляем все параметры из формы
+            const formElements = form.elements;
+            for (let element of formElements) {
+                if (element.name && element.value !== '') {
+                    if (element.type === 'checkbox') {
+                        formData.set(element.name, element.checked);
+                    } else if (element.type === 'file') {
+                        // Для файлов не перезаписываем, они уже есть в FormData
+                        if (element.files.length > 0) {
+                            formData.set(element.name, element.files[0]);
+                        }
+                    } else {
+                        formData.set(element.name, element.value);
+                    }
+                }
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/generate`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                const taskId = data.task_id;
+                
+                showStatus('📤 Задача отправлена...', 'pending');
+                updateProgress(5);
+                
+                // Начинаем polling статуса
+                pollingInterval = setInterval(() => pollTaskStatus(taskId), 2000);
+                
+            } catch (err) {
+                showStatus('❌ Ошибка отправки задачи: ' + err.message, 'failure');
+                loader.style.display = "none";
+                generateBtn.disabled = false;
+            }
+        };
+    </script>
+</body>
+</html>
