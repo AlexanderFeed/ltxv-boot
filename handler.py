@@ -44,11 +44,28 @@ def _save_bytes_to_tmp(ext: str, content: bytes) -> str:
 def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     """
     Создаёт LTXVideoCondition и проставляет маску в латентном масштабе.
+    Принимает список кадров (np.ndarray или PIL.Image), приводит к (T, C, H, W).
     """
-    # Приводим к формату (T, C, H, W)
-    if video_tensor.ndim == 4 and video_tensor.shape[-1] in (1, 3, 4):
-        # (T, H, W, C) → (T, C, H, W)
-        video_tensor = video_tensor.permute(0, 3, 1, 2)
+    import numpy as np
+
+    # Если это список кадров → конвертируем
+    if isinstance(video_tensor, list):
+        frames_np = []
+        for f in video_tensor:
+            if isinstance(f, Image.Image):
+                f = np.array(f.convert("RGB"))
+            if isinstance(f, torch.Tensor):
+                f = f.detach().cpu().numpy()
+            frames_np.append(f)
+        video_tensor = np.stack(frames_np, axis=0)  # (T, H, W, C)
+
+    # Если numpy с (T, H, W, C) → переводим в torch (T, C, H, W)
+    if isinstance(video_tensor, np.ndarray) and video_tensor.ndim == 4 and video_tensor.shape[-1] in (1, 3, 4):
+        video_tensor = torch.from_numpy(video_tensor).permute(0, 3, 1, 2)
+
+    # Уже torch.Tensor? тогда ок
+    if not isinstance(video_tensor, torch.Tensor):
+        raise ValueError(f"Unexpected video_tensor type: {type(video_tensor)}")
 
     cond = LTXVideoCondition(video=video_tensor, frame_index=0)
 
@@ -61,6 +78,7 @@ def _cond_with_mask(video_tensor, h: int, w: int, num_frames: int):
     cond.mask = mask
 
     return [cond]
+
 
 
 def _repeat_image_to_video(img: Image.Image, num_frames: int, fps: int = DEFAULT_FPS) -> str:
